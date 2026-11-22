@@ -3,7 +3,7 @@
  */
 'use strict';
 
-const APP_VERSION = '0.11.1';
+const APP_VERSION = '0.11.2';
 const STATUSES = ['접수', '견적', '예약', '완료', '취소'];
 const METHODS = ['계좌이체', '현금', '카드', '기타'];
 const PHOTO_KINDS = ['시공 전', '시공 후', '기타', '고객 사진'];
@@ -644,7 +644,7 @@ async function viewJob(id) {
         <label for="f_status">상태</label>
         <select id="f_status" name="status">${opts(statusList, j.status)}</select>
         <label for="f_type">작업 종류</label>
-        <select id="f_type" name="type">${opts(typeList, j.type)}</select>
+        <select id="f_type" name="type">${j.type ? '' : '<option value="" selected>작업 종류 선택(미정)</option>'}${opts(typeList, j.type)}</select>
         <label for="f_product">제품·크기·수량</label>
         <input id="f_product" name="product" value="${esc(j.product)}" placeholder="예: 미세방충망 1200×1500 3개">
         <div class="grid2">
