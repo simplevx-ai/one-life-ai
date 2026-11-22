@@ -3,7 +3,7 @@
  */
 'use strict';
 
-const APP_VERSION = '0.3.0';
+const APP_VERSION = '0.4.0';
 const STATUSES = ['접수', '견적', '예약', '완료', '취소'];
 const METHODS = ['계좌이체', '현금', '카드', '기타'];
 const PHOTO_KINDS = ['시공 전', '시공 후', '기타'];
@@ -132,6 +132,7 @@ const routes = [
   [/^#\/odiary$/, 'home', viewDiary],
   [/^#\/handover$/, 'home', viewHandover],
   [/^#\/notice$/, 'home', viewNotice],
+  [/^#\/ai$/, 'home', viewAI], // ai.js
 ];
 async function render() {
   const h = (location.hash || '#/').split('?')[0]; // ?뒤 값은 각 화면이 직접 읽는다
@@ -242,7 +243,7 @@ async function viewHome() {
     </div>
 
     <div class="card">
-      <div class="row spread"><h2 style="margin:0">🤖 AI 브리핑</h2><span class="muted">자동 요약</span></div>
+      <div class="row spread"><h2 style="margin:0">🤖 AI 브리핑</h2><a class="btn small primary" href="#/ai?m=voice">🎤 AI 비서에게 말하기</a></div>
       <ul style="margin:8px 0 0;padding-left:18px">${brief.map((s) => `<li>${esc(s)}</li>`).join('')}</ul>
     </div>
 
@@ -300,7 +301,7 @@ async function viewHome() {
       <div class="tiles">
         <a class="tile" href="#/jobs"><i>🛠</i>사업 관리</a>
         <a class="tile" href="#/office"><i>🏢</i>관리사무소${oa.open.length ? `<br><small style="color:var(--red)">미처리 ${oa.open.length}</small>` : ''}</a>
-        <a class="tile" href="#/notes"><i>🤖</i>AI 비서<br><small>빠른 기록</small></a>
+        <a class="tile" href="#/ai"><i>🤖</i>AI 비서</a>
         <span class="tile off"><i>📈</i>투자 분석<br><small>준비 중</small></span>
         <span class="tile off"><i>🏃</i>마라톤<br><small>준비 중</small></span>
         <span class="tile off"><i>🤿</i>프리다이빙<br><small>준비 중</small></span>
@@ -337,7 +338,7 @@ async function viewHome() {
 }
 
 /* ───────── 빠른 기록(음성·텍스트·사진) ───────── */
-const NOTE_TAGS = ['사업', '관리사무소', '개인', '아이디어'];
+const NOTE_TAGS = ['사업', '관리사무소', '개인', '아이디어', '마라톤', '프리다이빙', '투자'];
 
 async function viewNotes() {
   setTitle('빠른 기록', true);
@@ -376,6 +377,7 @@ async function viewNote(id, mode) {
   setTitle(note ? '기록' : '새 기록', true);
   let photo = n.photo || null;
   let via = n.via || (mode === 'voice' ? 'voice' : 'text');
+  let tagTouched = false;
   const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
 
   view().innerHTML = `
@@ -408,6 +410,7 @@ async function viewNote(id, mode) {
     if (photo) $('#n_rmPhoto').onclick = () => { photo = null; drawPhoto(); };
   }
   drawPhoto();
+  $('#n_tag').onchange = () => { tagTouched = true; };
   const takePhoto = async (e) => {
     const f = e.target.files[0]; e.target.value = '';
     if (!f) return;
@@ -443,7 +446,10 @@ async function viewNote(id, mode) {
     if (rec) rec.stop();
     const text = $('#n_text').value.trim();
     if (!text && !photo) { toast('내용이나 사진을 넣어 주세요'); return null; }
-    const data = { ...(note || { id: uid(), createdAt: new Date().toISOString() }), tag: $('#n_tag').value, text, photo, via, done: note ? $('#n_done').checked : false, updatedAt: new Date().toISOString() };
+    // 새 기록이고 분류를 직접 바꾸지 않았으면 내용을 보고 업무 분야를 자동으로 정한다
+    let tag = $('#n_tag').value;
+    if (!note && !tagTouched && text) { const a = classifyCommand(text).area; if (NOTE_TAGS.includes(a)) tag = a; }
+    const data = { ...(note || { id: uid(), createdAt: new Date().toISOString() }), tag, text, photo, via, done: note ? $('#n_done').checked : false, updatedAt: new Date().toISOString() };
     await DB.put('notes', data);
     return data;
   };

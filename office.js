@@ -326,6 +326,7 @@ async function viewOfficeRec(id) {
       location.replace('#/orecs');
     };
   }
+  if (qs.get('draft') && !rec) { const d = sessionStorage.getItem('officeDraft'); sessionStorage.removeItem('officeDraft'); if (d) { $('#o_text').value = d; applyAuto(); } }
   if (mode === 'voice' && !rec) setTimeout(() => $('#o_mic').click(), 300);
   if (mode === 'photo' && !rec) setTimeout(() => $('#o_cam').click(), 300);
 }

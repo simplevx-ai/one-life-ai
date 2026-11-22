@@ -1,6 +1,6 @@
 // 앱 화면 파일을 폰에 저장해 인터넷 없이도 열리게 한다. (고객 데이터는 IndexedDB에 따로 있음)
-const CACHE = 'onelife-v0.3.0';
-const FILES = ['./', 'index.html', 'style.css', 'app.js', 'office.js', 'manifest.webmanifest', 'icons/icon-192.png', 'icons/icon-512.png'];
+const CACHE = 'onelife-v0.4.0';
+const FILES = ['./', 'index.html', 'style.css', 'app.js', 'office.js', 'ai.js', 'manifest.webmanifest', 'icons/icon-192.png', 'icons/icon-512.png'];
 
 self.addEventListener('install', (e) => {
   e.waitUntil(caches.open(CACHE).then((c) => c.addAll(FILES)).then(() => self.skipWaiting()));
