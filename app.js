@@ -3,7 +3,7 @@
  */
 'use strict';
 
-const APP_VERSION = '0.2.0';
+const APP_VERSION = '0.2.1';
 const STATUSES = ['접수', '견적', '예약', '완료', '취소'];
 const METHODS = ['계좌이체', '현금', '카드', '기타'];
 const PHOTO_KINDS = ['시공 전', '시공 후', '기타'];
@@ -674,8 +674,8 @@ async function syncSheet() {
       if (normV(k, v) !== normV(k, s)) cols[k] = v;
       if (normV(k, v) !== normV(k, a)) sheetWon = true;
     }
-    const miss = missingOf(res, photoCnt(j.id), r[8]);
-    if (miss !== r[10]) cols.K = miss;
+    // 빠진 항목(K)은 문의 정리 작업이 더 자세히 적으므로 이미 있는 줄은 건드리지 않는다(새 줄만 앱이 계산)
+    const miss = r[10];
     if (Object.keys(cols).length) updates.push({ id: r[0], cols });
     if (sheetWon) { applyVals(j, c, res); fromSheet++; }
     j.sheetBase = res; j.photoLink = r[8]; j.missing = miss; j.syncedAt = now;
