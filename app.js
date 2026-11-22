@@ -3,12 +3,12 @@
  */
 'use strict';
 
-const APP_VERSION = '0.10.0';
+const APP_VERSION = '0.11.0';
 const STATUSES = ['접수', '견적', '예약', '완료', '취소'];
 const METHODS = ['계좌이체', '현금', '카드', '기타'];
-const PHOTO_KINDS = ['시공 전', '시공 후', '기타'];
+const PHOTO_KINDS = ['시공 전', '시공 후', '기타', '고객 사진'];
 const DEFAULT_LISTS = {
-  jobTypes: ['방충망 교체', '방충망 수리', '안전방충망', 'TV 설치', '타일', '기타'],
+  jobTypes: ['컴퓨터', '방충망', 'TV 설치', 'LED 시계', '타일 복원', '기타'],
   sources: ['블로그', '전화', '지인', '문자·카톡', '기타'],
 };
 
@@ -17,7 +17,7 @@ const DB = (() => {
   let dbp = null;
   function open() {
     if (!dbp) dbp = new Promise((res, rej) => {
-      const r = indexedDB.open('onelife', 5);
+      const r = indexedDB.open('onelife', 6);
       r.onupgradeneeded = () => {
         const d = r.result;
         const has = (n) => d.objectStoreNames.contains(n);
@@ -39,6 +39,8 @@ const DB = (() => {
         if (!has('mkt')) d.createObjectStore('mkt', { keyPath: 'id' });
         // v5: 운동노트(run·shoe·race·table·tablerun·dive를 type으로 구분)
         if (!has('sport')) d.createObjectStore('sport', { keyPath: 'id' });
+        // v6: 현장노트 장부 지출
+        if (!has('expense')) d.createObjectStore('expense', { keyPath: 'id' });
       };
       r.onblocked = () => alert('앱이 다른 탭에서도 열려 있습니다. 다른 탭을 닫고 다시 열어 주세요.');
       r.onsuccess = () => res(r.result);
@@ -129,7 +131,17 @@ const routes = [
   [/^#\/job\/([\w-]+)$/, 'jobs', (m) => viewJob(m[1])],
   [/^#\/customers$/, 'customers', viewCustomers],
   [/^#\/customer\/([\w-]+)$/, 'customers', (m) => viewCustomer(m[1])],
-  [/^#\/sales$/, 'sales', viewSales],
+  [/^#\/sales$/, 'sales', viewLedger],
+  // 현장노트 (biz.js)
+  [/^#\/biz$/, 'jobs', viewBiz],
+  [/^#\/cal$/, 'jobs', viewCal],
+  [/^#\/fc\/([\w-]+)$/, 'jobs', (m) => viewFieldCheck(m[1])],
+  [/^#\/est\/([\w-]+)$/, 'jobs', (m) => viewEstimate(m[1])],
+  [/^#\/prices$/, 'jobs', viewPrices],
+  [/^#\/bizset$/, 'jobs', viewBizSet],
+  [/^#\/ledger$/, 'sales', viewLedger],
+  [/^#\/exp\/new$/, 'sales', () => viewExpense(null)],
+  [/^#\/exp\/([\w-]+)$/, 'sales', (m) => viewExpense(m[1])],
   [/^#\/settings$/, 'settings', viewSettings],
   [/^#\/notes$/, 'home', viewNotes],
   [/^#\/note\/new$/, 'home', () => viewNote(null, new URLSearchParams(location.hash.split('?')[1] || '').get('m'))],
@@ -358,7 +370,7 @@ async function viewHome() {
     <div class="card">
       <h2>ONE LIFE 모듈</h2>
       <div class="tiles">
-        <a class="tile" href="#/jobs"><i>🛠</i>사업 관리</a>
+        <a class="tile" href="#/biz"><i>🛠</i>현장노트</a>
         <a class="tile" href="#/office"><i>🏢</i>관리사무소${oa.open.length ? `<br><small style="color:var(--red)">미처리 ${oa.open.length}</small>` : ''}</a>
         <a class="tile" href="#/ai"><i>🤖</i>AI 비서</a>
         <a class="tile" href="#/reports"><i>📸</i>현장 보고서</a>
@@ -675,7 +687,8 @@ async function viewJob(id) {
       <button class="btn block" id="addPay" type="button" style="margin-top:10px">+ 입금 기록</button>
     </div>
     <div class="card">
-      <h2>보고서·블로그</h2>
+      <h2>현장 체크·견적·보고서</h2>
+      <div class="row" style="margin-bottom:8px"><a class="btn block" href="#/fc/${job.id}">📋 현장 체크</a><a class="btn block" href="#/est/${job.id}">🧾 견적서</a></div>
       <a class="btn primary block" href="#/report/${job.id}" style="margin-bottom:8px">📄 현장 보고서 (사진으로 고객용 보고서)</a>
       <button class="btn block" id="copyBlog" type="button">📋 블로그 자료 복사</button>
       <div class="muted" style="margin-top:6px">지역·작업·제품·문제·해결·키워드를 정리해 복사합니다. Claude나 블로그 글쓰기에 붙여넣으세요.</div>
@@ -862,30 +875,6 @@ async function viewCustomers() {
   $('#q').oninput = (e) => { q = e.target.value.trim().toLowerCase(); draw(); };
   draw();
   fab('#/job/new');
-}
-
-async function viewCustomer(id) {
-  const c = await DB.get('customers', id);
-  setTitle(c ? nameOf(c) : '고객', true);
-  if (!c) { view().innerHTML = '<div class="empty">고객을 찾을 수 없습니다.</div>'; return; }
-  const [jobs, pays] = await Promise.all([DB.by('jobs', 'customerId', id), DB.all('payments')]);
-  jobs.sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
-  const total = jobs.reduce((a, j) => a + paidOf(j.id, pays), 0);
-  view().innerHTML = `
-    <div class="card">
-      <div class="t" style="font-size:20px;font-weight:800">${esc(nameOf(c))}</div>
-      <div class="muted">${esc([prettyPhone(c.phone), c.area, c.address].filter(Boolean).join(' · '))}</div>
-      <div class="muted">유입: ${esc(c.source || '-')} · 작업 ${jobs.length}건 · 받은 금액 ${won(total)}</div>
-      ${c.phone ? `<div class="row" style="margin-top:10px"><a class="btn small" href="tel:${digits(c.phone)}">📞 전화</a><a class="btn small" href="sms:${digits(c.phone)}">💬 문자</a></div>` : ''}
-    </div>
-    <h2 style="font-size:16px">작업 이력</h2>
-    ${jobs.map((j) => `<a class="item" href="#/job/${j.id}"><div class="row spread"><span class="t">${esc(j.type || '작업')}</span><span class="badge s-${j.status}">${j.status}</span></div>
-      <div class="muted">${esc([j.scheduledAt ? fmtDate(j.scheduledAt) : (j.createdAt || '').slice(0, 10), j.product, j.quote ? won(j.quote) : ''].filter(Boolean).join(' · '))}</div></a>`).join('') || '<div class="empty">작업이 없습니다.</div>'}
-    <button class="btn danger block" id="delCust" type="button" style="margin-top:12px">고객 삭제</button>`;
-  $('#delCust').onclick = async () => {
-    if (jobs.length) { toast('작업이 남아 있어 지울 수 없습니다. 작업을 먼저 지우세요.'); return; }
-    if (confirm('이 고객을 지울까요?')) { await DB.del('customers', id); location.replace('#/customers'); }
-  };
 }
 
 /* ───────── 매출 ───────── */
@@ -1147,15 +1136,15 @@ async function viewSettings() {
 const blobToDataURL = (b) => new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(r.result); r.onerror = () => rej(r.error); r.readAsDataURL(b); });
 async function dataURLToBlob(u) { return (await fetch(u)).blob(); }
 
-const BACKUP_STORES = ['customers', 'jobs', 'payments', 'photos', 'settings', 'tasks', 'notes', 'office', 'schedules', 'invest', 'mkt', 'sport'];
+const BACKUP_STORES = ['customers', 'jobs', 'payments', 'photos', 'settings', 'tasks', 'notes', 'office', 'schedules', 'invest', 'mkt', 'sport', 'expense'];
 async function exportBackup() {
   toast('백업 파일 만드는 중…');
-  const [customers, jobs, payments, photos, settings, tasks, notes, office, schedules, invest, mkt, sport] = await Promise.all(BACKUP_STORES.map((s) => DB.all(s)));
+  const [customers, jobs, payments, photos, settings, tasks, notes, office, schedules, invest, mkt, sport, expense] = await Promise.all(BACKUP_STORES.map((s) => DB.all(s)));
   const ph = [];
   for (const p of photos) ph.push({ ...p, blob: undefined, data: await blobToDataURL(p.blob) });
   const nt = [];
   for (const n of notes) nt.push({ ...n, photo: undefined, photoData: n.photo ? await blobToDataURL(n.photo) : '', audio: undefined, audioData: n.audio ? await blobToDataURL(n.audio) : '' });
-  const out = { app: 'ONE LIFE AI', version: APP_VERSION, exportedAt: nowISO(), customers, jobs, payments, settings: settings.filter((s) => s.key !== 'lastBackup'), photos: ph, tasks, notes: nt, office, schedules, invest, mkt, sport };
+  const out = { app: 'ONE LIFE AI', version: APP_VERSION, exportedAt: nowISO(), customers, jobs, payments, settings: settings.filter((s) => s.key !== 'lastBackup'), photos: ph, tasks, notes: nt, office, schedules, invest, mkt, sport, expense };
   const blob = new Blob([JSON.stringify(out)], { type: 'application/json' });
   const name = `onelife-backup-${todayStr()}.json`;
   const file = new File([blob], name, { type: 'application/json' });
@@ -1193,6 +1182,7 @@ async function importBackup(text) {
   for (const x of d.invest || []) await DB.put('invest', x);
   for (const x of d.mkt || []) await DB.put('mkt', x);
   for (const x of d.sport || []) await DB.put('sport', x);
+  for (const x of d.expense || []) await DB.put('expense', x);
   await setSetting('lastBackup', Date.now());
 }
 
