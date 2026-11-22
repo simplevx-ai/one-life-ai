@@ -299,7 +299,7 @@ async function viewOfficeRec(id) {
     if (recg) recg.stop();
     const text = $('#o_text').value.trim();
     if (!text && !pending.length) { toast('내용이나 사진을 넣어 주세요'); return; }
-    const now = new Date().toISOString();
+    const now = nowISO();
     const done = $('#o_done').value === '완료';
     const data = {
       ...(rec || { id: uid(), createdAt: now }),
@@ -372,13 +372,13 @@ async function viewSched() {
     e.preventDefault();
     const name = $('#s_name').value.trim();
     if (!name) { toast('점검 이름을 넣어 주세요'); return; }
-    await DB.put('schedules', { id: uid(), name, cat: $('#s_cat').value, cycle: $('#s_cycle').value, firstDue: $('#s_first').value || todayStr(), lastDone: '', vendor: $('#s_vendor').value.trim(), createdAt: new Date().toISOString() });
+    await DB.put('schedules', { id: uid(), name, cat: $('#s_cat').value, cycle: $('#s_cycle').value, firstDue: $('#s_first').value || todayStr(), lastDone: '', vendor: $('#s_vendor').value.trim(), createdAt: nowISO() });
     toast('추가했습니다'); render();
   };
   view().querySelectorAll('[data-done]').forEach((b) => {
     b.onclick = async () => {
       const s = await DB.get('schedules', b.dataset.done);
-      const now = new Date().toISOString();
+      const now = nowISO();
       await DB.put('schedules', { ...s, lastDone: todayStr() });
       await DB.put('office', { id: uid(), kind: '점검·이상', cat: s.cat, loc: '', text: `정기점검: ${s.name}`, status: '정상', action: '없음', done: true, doneAt: now, due: '', vendor: s.vendor || '', unit: '', result: '', createdAt: now, updatedAt: now, schedId: s.id });
       toast('점검 완료로 기록했습니다'); render();

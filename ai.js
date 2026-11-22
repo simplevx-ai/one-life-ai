@@ -181,7 +181,7 @@ function aiLogSave(l) { try { localStorage.setItem(AI_LOG_KEY, JSON.stringify(l.
 
 async function runCommand(text, photo) {
   const cls = classifyCommand(text, !!photo);
-  const out = { q: text, at: new Date().toISOString(), area: cls.area, intent: cls.intent, body: '', actions: [] };
+  const out = { q: text, at: nowISO(), area: cls.area, intent: cls.intent, body: '', actions: [] };
   const t = text;
 
   if (cls.intent === 'save' || (cls.intent === 'chat' && (cls.area === '프리다이빙' || cls.area === '마라톤') && /\d/.test(t))) {
@@ -191,7 +191,7 @@ async function runCommand(text, photo) {
     if (cls.area === '마라톤') { const r = parseRun(t); extra = [r.km && `거리 ${r.km}km`, r.time && `시간 ${r.time}`, r.pace && `페이스 ${r.pace}/km`].filter(Boolean).join(' · '); }
     const tag = NOTE_TAGS.includes(cls.area) ? cls.area : '개인';
     const clean = t.replace(/(저장해\s*줘?|저장|기록해\s*줘?|남겨\s*줘?|메모해\s*줘?|등록해\s*줘?)[.!]?\s*$/, '').trim();
-    const note = { id: uid(), createdAt: new Date().toISOString(), tag, text: clean + (extra ? `\n[${extra}]` : ''), photo: photo || null, via: 'ai', done: false, data: extra };
+    const note = { id: uid(), createdAt: nowISO(), tag, text: clean + (extra ? `\n[${extra}]` : ''), photo: photo || null, via: 'ai', done: false, data: extra };
     await DB.put('notes', note);
     out.body = `'${tag}' 기록으로 저장했습니다.${extra ? `\n정리: ${extra}` : ''}${cls.area === '프리다이빙' && !extra ? '\n수심·시간·장소를 말하면 같이 정리됩니다(예: 오늘 K26에서 FIM 25m, 1분 10초).' : ''}`;
     out.actions.push({ label: '기록 보기', href: `#/note/${note.id}` });
@@ -232,7 +232,7 @@ async function runCommand(text, photo) {
     photo: '사진 판독은 Claude에게 넘깁니다. Claude 앱이 열리면 이 사진을 첨부해 주세요.',
   }[cls.intent] || '앱 안에서 바로 처리할 수 없는 요청이라 Claude에게 넘길 요청문을 만들었습니다.';
   if (photo) {
-    await DB.put('notes', { id: uid(), createdAt: new Date().toISOString(), tag: NOTE_TAGS.includes(cls.area) ? cls.area : '개인', text: t, photo, via: 'ai', done: false });
+    await DB.put('notes', { id: uid(), createdAt: nowISO(), tag: NOTE_TAGS.includes(cls.area) ? cls.area : '개인', text: t, photo, via: 'ai', done: false });
     out.body += '\n사진은 빠른 기록에도 저장했습니다.';
   }
   out.actions.push({ label: '🤖 Claude에게 보내기', claude: true });
@@ -248,6 +248,11 @@ async function viewAI() {
   const EX = ['오늘 할 일 정리해 줘', '이번 달 설치 매출 정리해 줘', '이번 주 마라톤 훈련 계획 세워줘', '오늘 다이빙 기록 저장해', '이 사진에 있는 내용을 정리해 줘', '다음 주에 해야 할 일 중 빠진 게 있는지 확인해 줘', '오늘 주식시장 주요 AI 반도체 뉴스 정리해 줘'];
 
   view().innerHTML = `
+    <div class="card" style="border-color:var(--blue)">
+      <div class="row spread"><h2 style="margin:0">🎙 음성 기록</h2><a class="btn small" href="#/voice">목록 ›</a></div>
+      <div class="muted" style="margin:4px 0 8px">녹음하거나 녹음 파일을 넣으면 글로 바꾸고, 요약과 할 일까지 뽑아 줍니다. (폰 안에서 처리)</div>
+      <div class="grid2"><a class="btn primary" href="#/voice/new?m=rec">● 녹음 시작</a><a class="btn" href="#/voice/new?m=file">📁 녹음 파일 넣기</a></div>
+    </div>
     <div id="aiLog"></div>
     <div class="card" style="position:sticky;bottom:calc(72px + env(safe-area-inset-bottom));z-index:4">
       <div id="aiPhoto"></div>
@@ -268,11 +273,11 @@ async function viewAI() {
         <div class="row wrap" style="gap:4px;margin-bottom:6px"><span class="badge">${esc(m.area)}</span><span class="badge">${esc(INTENT_LABEL[m.intent] || m.intent)}</span>${m.needClaude ? '<span class="badge" style="color:#7A4CD1">Claude 필요</span>' : '<span class="badge s-완료">앱에서 처리</span>'}</div>
         <div style="white-space:pre-wrap;font-size:15px">${esc(m.body)}</div>
         ${m.actions && m.actions.length ? `<div class="row wrap" style="margin-top:8px">${m.actions.map((a, k) => a.href ? `<a class="btn small" href="${a.href}">${esc(a.label)}</a>` : `<button class="btn small${a.claude ? ' primary' : ''}" data-i="${i}" data-k="${k}" type="button">${esc(a.label)}</button>`).join('')}</div>` : ''}
-      </div>`).join('') : `<div class="card"><h2>🤖 무엇을 도와드릴까요?</h2><div class="muted">말하거나 적으면 업무별로 나눠서 처리합니다. 앱 안의 기록으로 되는 일은 바로 하고, 새 글이 필요한 일은 Claude에게 넘깁니다.</div>
+      </div>`).join('') : `<div class="card"><h2>🤖 무엇을 도와드릴까요?</h2><div class="muted" style="margin-bottom:6px">명령으로 물어보기</div><div class="muted">말하거나 적으면 업무별로 나눠서 처리합니다. 앱 안의 기록으로 되는 일은 바로 하고, 새 글이 필요한 일은 Claude에게 넘깁니다.</div>
         <div class="chips" style="flex-wrap:wrap;margin-top:10px">${EX.map((e) => `<button class="chip" data-ex="${esc(e)}" type="button">${esc(e)}</button>`).join('')}</div></div>`;
     if (l.length) $('#aiLog').insertAdjacentHTML('afterbegin', '<div class="row" style="justify-content:flex-end"><button class="btn small" id="aiClear" type="button">대화 지우기</button></div>');
     $('#aiClear') && ($('#aiClear').onclick = () => { aiLogSave([]); draw(); });
-    setTimeout(() => window.scrollTo(0, document.body.scrollHeight), 60); // 최근 대화가 보이게(화면 전환 후)
+    if (l.length) setTimeout(() => window.scrollTo(0, document.body.scrollHeight), 60); // 대화가 있을 때만 최근 대화가 보이게
   }
   $('#aiLog').onclick = async (e) => {
     const ex = e.target.closest('[data-ex]');

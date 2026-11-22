@@ -3,7 +3,7 @@
  */
 'use strict';
 
-const APP_VERSION = '0.6.0';
+const APP_VERSION = '0.7.0';
 const STATUSES = ['접수', '견적', '예약', '완료', '취소'];
 const METHODS = ['계좌이체', '현금', '카드', '기타'];
 const PHOTO_KINDS = ['시공 전', '시공 후', '기타'];
@@ -88,6 +88,11 @@ function prettyPhone(s) {
   return s || '';
 }
 const pad = (n) => String(n).padStart(2, '0');
+// 한국 시간 그대로 저장(+09:00). 앞 10글자가 그 지역의 날짜가 되도록
+function nowISO(d = new Date()) {
+  const o = -d.getTimezoneOffset(), a = Math.abs(o);
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}${o >= 0 ? '+' : '-'}${pad(Math.floor(a / 60))}:${pad(a % 60)}`;
+}
 const todayStr = () => { const d = new Date(); return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`; };
 const monthStr = (d = new Date()) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}`;
 function fmtDate(s) {
@@ -135,6 +140,10 @@ const routes = [
   [/^#\/handover$/, 'home', viewHandover],
   [/^#\/notice$/, 'home', viewNotice],
   [/^#\/ai$/, 'home', viewAI], // ai.js
+  // 음성 기록 (voice.js)
+  [/^#\/voice$/, 'home', viewVoiceList],
+  [/^#\/voice\/new$/, 'home', viewVoiceNew],
+  [/^#\/voice\/([\w-]+)$/, 'home', (m) => viewVoice(m[1])],
   // 현장 보고서 (report.js)
   [/^#\/reports$/, 'home', viewReports],
   [/^#\/report\/new$/, 'home', viewReportNew],
@@ -326,7 +335,7 @@ async function viewHome() {
     if (!text) return;
     const area = $('#taskArea').value;
     sessionStorage.setItem('taskArea', area);
-    await DB.put('tasks', { id: uid(), text, area, date: today, done: false, createdAt: new Date().toISOString() });
+    await DB.put('tasks', { id: uid(), text, area, date: today, done: false, createdAt: nowISO() });
     render();
   };
   $('#taskList').onclick = async (e) => {
@@ -338,7 +347,7 @@ async function viewHome() {
     if (!id) return;
     const t = await DB.get('tasks', id);
     // 지난 날짜 일을 오늘 끝내면 오늘 기록으로 옮긴다
-    await DB.put('tasks', { ...t, done: e.target.checked, doneAt: e.target.checked ? new Date().toISOString() : '', date: e.target.checked ? today : t.date });
+    await DB.put('tasks', { ...t, done: e.target.checked, doneAt: e.target.checked ? nowISO() : '', date: e.target.checked ? today : t.date });
     render();
   };
 }
@@ -358,7 +367,7 @@ async function viewNotes() {
     $('#noteList').innerHTML = list.length ? list.map((n) => {
       let img = '';
       if (n.photo) { const u = URL.createObjectURL(n.photo); urls.push(u); img = `<img src="${u}" alt="" style="width:64px;height:64px;object-fit:cover;border-radius:8px;flex:none">`; }
-      return `<a class="item row" href="#/note/${n.id}" style="align-items:flex-start">${img}<div style="flex:1;min-width:0">
+      return `<a class="item row" href="${n.via === 'voice-rec' ? '#/voice/' : '#/note/'}${n.id}" style="align-items:flex-start">${img}<div style="flex:1;min-width:0">
         <div class="muted">${esc(fmtDate((n.createdAt || '').slice(0, 10)))} ${esc((n.createdAt || '').slice(11, 16))} · ${esc(n.tag || '')} ${n.via === 'voice' ? '🎤' : ''}${n.done ? ' · ✅ 처리함' : ''}</div>
         <div style="white-space:pre-wrap;overflow:hidden;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical">${esc(n.text || '(사진만)')}</div></div></a>`;
     }).join('') : '<div class="empty">기록이 없습니다.</div>';
@@ -455,7 +464,7 @@ async function viewNote(id, mode) {
     // 새 기록이고 분류를 직접 바꾸지 않았으면 내용을 보고 업무 분야를 자동으로 정한다
     let tag = $('#n_tag').value;
     if (!note && !tagTouched && text) { const a = classifyCommand(text).area; if (NOTE_TAGS.includes(a)) tag = a; }
-    const data = { ...(note || { id: uid(), createdAt: new Date().toISOString() }), tag, text, photo, via, done: note ? $('#n_done').checked : false, updatedAt: new Date().toISOString() };
+    const data = { ...(note || { id: uid(), createdAt: nowISO() }), tag, text, photo, via, done: note ? $('#n_done').checked : false, updatedAt: nowISO() };
     await DB.put('notes', data);
     return data;
   };
@@ -468,12 +477,12 @@ async function viewNote(id, mode) {
 
   $('#n_toTask').onclick = async () => {
     const d = await save(); if (!d) return;
-    await DB.put('tasks', { id: uid(), text: (d.text || '사진 기록 확인').split('\n')[0].slice(0, 80), area: TASK_AREAS.includes(d.tag) ? d.tag : '개인', date: todayStr(), done: false, createdAt: new Date().toISOString(), noteId: d.id });
+    await DB.put('tasks', { id: uid(), text: (d.text || '사진 기록 확인').split('\n')[0].slice(0, 80), area: TASK_AREAS.includes(d.tag) ? d.tag : '개인', date: todayStr(), done: false, createdAt: nowISO(), noteId: d.id });
     toast('오늘 체크리스트에 추가했습니다');
   };
   $('#n_toJob').onclick = async () => {
     const d = await save(); if (!d) return;
-    const now = new Date().toISOString();
+    const now = nowISO();
     const c = { id: uid(), name: '', phone: (d.text.match(/01[016789][-\s]?\d{3,4}[-\s]?\d{4}/) || [''])[0].replace(/\D/g, ''), createdAt: now, updatedAt: now };
     await DB.put('customers', c);
     const j = { id: uid(), customerId: c.id, status: '접수', summary: d.text, createdAt: now, updatedAt: now };
@@ -636,7 +645,7 @@ async function viewJob(id) {
     e.preventDefault();
     const f = Object.fromEntries(new FormData(e.target).entries());
     if (!f.name.trim() && !digits(f.phone)) { toast('이름이나 연락처를 넣어 주세요'); return; }
-    const now = new Date().toISOString();
+    const now = nowISO();
     // 고객: 기존 작업이면 그 고객을 고치고, 새 작업이면 같은 전화번호 고객을 찾아 연결
     let c = job ? cust : null;
     if (!c || !c.id) {
@@ -689,7 +698,7 @@ async function viewJob(id) {
     for (const file of files) {
       try {
         const blob = await shrink(file, 1600, 0.82);
-        await DB.put('photos', { id: uid(), jobId: job.id, kind, blob, createdAt: new Date().toISOString(), taken: file.lastModified ? new Date(file.lastModified).toISOString() : '' });
+        await DB.put('photos', { id: uid(), jobId: job.id, kind, blob, createdAt: nowISO(), taken: file.lastModified ? new Date(file.lastModified).toISOString() : '' });
         n++;
       } catch (err) { console.error(err); }
     }
@@ -715,7 +724,7 @@ async function viewJob(id) {
   $('#addPay').onclick = async () => {
     const amt = Number($('#p_amt').value || $('#p_amt').placeholder);
     if (!amt) { toast('금액을 넣어 주세요'); return; }
-    await DB.put('payments', { id: uid(), jobId: job.id, amount: amt, date: $('#p_date').value || todayStr(), method: $('#p_method').value, createdAt: new Date().toISOString() });
+    await DB.put('payments', { id: uid(), jobId: job.id, amount: amt, date: $('#p_date').value || todayStr(), method: $('#p_method').value, createdAt: nowISO() });
     $('#p_amt').value = '';
     toast('입금 기록했습니다');
     drawPays();
@@ -931,7 +940,7 @@ async function syncSheet() {
   const cmap = Object.fromEntries(custs.map((c) => [c.id, c]));
   const photoCnt = (id) => photos.filter((p) => p.jobId === id).length;
   const byId = Object.fromEntries(jobs.filter((j) => j.sheetId).map((j) => [j.sheetId, j]));
-  const now = new Date().toISOString();
+  const now = nowISO();
   const updates = [], appends = [], cases = [], touched = new Map();
   let created = 0, fromSheet = 0;
 
@@ -1101,8 +1110,8 @@ async function exportBackup() {
   const ph = [];
   for (const p of photos) ph.push({ ...p, blob: undefined, data: await blobToDataURL(p.blob) });
   const nt = [];
-  for (const n of notes) nt.push({ ...n, photo: undefined, photoData: n.photo ? await blobToDataURL(n.photo) : '' });
-  const out = { app: 'ONE LIFE AI', version: APP_VERSION, exportedAt: new Date().toISOString(), customers, jobs, payments, settings: settings.filter((s) => s.key !== 'lastBackup'), photos: ph, tasks, notes: nt, office, schedules, invest };
+  for (const n of notes) nt.push({ ...n, photo: undefined, photoData: n.photo ? await blobToDataURL(n.photo) : '', audio: undefined, audioData: n.audio ? await blobToDataURL(n.audio) : '' });
+  const out = { app: 'ONE LIFE AI', version: APP_VERSION, exportedAt: nowISO(), customers, jobs, payments, settings: settings.filter((s) => s.key !== 'lastBackup'), photos: ph, tasks, notes: nt, office, schedules, invest };
   const blob = new Blob([JSON.stringify(out)], { type: 'application/json' });
   const name = `onelife-backup-${todayStr()}.json`;
   const file = new File([blob], name, { type: 'application/json' });
@@ -1126,7 +1135,7 @@ async function importBackup(text) {
   const photos = [];
   for (const p of d.photos || []) { const { data, ...rest } = p; photos.push({ ...rest, blob: await dataURLToBlob(data) }); }
   const notes = [];
-  for (const n of d.notes || []) { const { photoData, ...rest } = n; notes.push({ ...rest, photo: photoData ? await dataURLToBlob(photoData) : null }); }
+  for (const n of d.notes || []) { const { photoData, audioData, ...rest } = n; notes.push({ ...rest, photo: photoData ? await dataURLToBlob(photoData) : null, audio: audioData ? await dataURLToBlob(audioData) : null }); }
   for (const s of BACKUP_STORES) await DB.clear(s);
   for (const x of d.customers || []) await DB.put('customers', x);
   for (const x of d.jobs) await DB.put('jobs', x);

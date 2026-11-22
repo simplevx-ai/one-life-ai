@@ -48,7 +48,7 @@ async function bizInfo() {
 /* 자동 작성 */
 function autoReport(j, c, photos, biz) {
   const tpl = REPORT_TPL[j.type] || REPORT_TPL['기타'];
-  const date = (j.scheduledAt || j.doneAt || j.updatedAt || new Date().toISOString()).slice(0, 10);
+  const date = (j.scheduledAt || j.doneAt || j.updatedAt || nowISO()).slice(0, 10);
   const nb = photos.filter((p) => p.kind === '시공 전').length, na = photos.filter((p) => p.kind === '시공 후').length;
   return {
     title: `${j.type || '시공'} 완료 보고서`,
@@ -96,7 +96,7 @@ async function viewReportNew() {
     </form>`;
   $('#rn').onsubmit = async (e) => {
     e.preventDefault();
-    const now = new Date().toISOString();
+    const now = nowISO();
     const ph = digits($('#rn_phone').value);
     let c = ph ? (await DB.all('customers')).find((x) => digits(x.phone) === ph) : null;
     c = { ...(c || { id: uid(), createdAt: now }), name: $('#rn_name').value.trim() || (c && c.name) || '', phone: ph || (c && c.phone) || '', area: $('#rn_area').value.trim(), updatedAt: now };
@@ -164,7 +164,7 @@ async function viewReport(id) {
     inp.onchange = async (e) => {
       const files = [...e.target.files]; const k = e.target.dataset.k; e.target.value = '';
       toast('사진 저장 중…');
-      for (const f of files) { try { await DB.put('photos', { id: uid(), jobId: id, kind: k, blob: await shrink(f, 1600, 0.82), createdAt: new Date().toISOString() }); } catch (err) { toast(err.message); } }
+      for (const f of files) { try { await DB.put('photos', { id: uid(), jobId: id, kind: k, blob: await shrink(f, 1600, 0.82), createdAt: nowISO() }); } catch (err) { toast(err.message); } }
       photos = (await DB.by('photos', 'jobId', id)).sort((a, b) => (a.createdAt || '').localeCompare(b.createdAt || ''));
       drawPhotos();
     };
@@ -178,7 +178,7 @@ async function viewReport(id) {
     const b = readBiz();
     await setSetting('biz', b);
     const jj = await DB.get('jobs', id);
-    await DB.put('jobs', { ...jj, report, reportPhotos: [...sel].filter((x) => x !== '__none__'), updatedAt: new Date().toISOString() });
+    await DB.put('jobs', { ...jj, report, reportPhotos: [...sel].filter((x) => x !== '__none__'), updatedAt: nowISO() });
     return { report, b };
   };
   $('#reAuto').onclick = () => {
@@ -212,7 +212,7 @@ async function viewReport(id) {
         if (navigator.canShare && navigator.canShare({ files: [file] })) {
           try {
             await navigator.share({ files: [file], text: txt });
-            const jj = await DB.get('jobs', id); await DB.put('jobs', { ...jj, reportAt: new Date().toISOString() });
+            const jj = await DB.get('jobs', id); await DB.put('jobs', { ...jj, reportAt: nowISO() });
             toast('보냈습니다');
           } catch (e) { if (e.name !== 'AbortError') toast('공유 실패: ' + e.message); }
         } else toast('이 기기는 바로 보내기를 지원하지 않습니다. 저장한 뒤 보내 주세요');
