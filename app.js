@@ -3,7 +3,7 @@
  */
 'use strict';
 
-const APP_VERSION = '0.4.0';
+const APP_VERSION = '0.5.0';
 const STATUSES = ['접수', '견적', '예약', '완료', '취소'];
 const METHODS = ['계좌이체', '현금', '카드', '기타'];
 const PHOTO_KINDS = ['시공 전', '시공 후', '기타'];
@@ -17,7 +17,7 @@ const DB = (() => {
   let dbp = null;
   function open() {
     if (!dbp) dbp = new Promise((res, rej) => {
-      const r = indexedDB.open('onelife', 2);
+      const r = indexedDB.open('onelife', 3);
       r.onupgradeneeded = () => {
         const d = r.result;
         const has = (n) => d.objectStoreNames.contains(n);
@@ -33,6 +33,8 @@ const DB = (() => {
         // v2: 관리사무소(기록·정기점검). 사진은 photos 저장소에 jobId=기록 id로 넣는다
         if (!has('office')) d.createObjectStore('office', { keyPath: 'id' });
         if (!has('schedules')) d.createObjectStore('schedules', { keyPath: 'id' });
+        // v3: 투자 분석(관심종목 watch·시나리오 scenario·기록 journal을 type으로 구분)
+        if (!has('invest')) d.createObjectStore('invest', { keyPath: 'id' });
       };
       r.onblocked = () => alert('앱이 다른 탭에서도 열려 있습니다. 다른 탭을 닫고 다시 열어 주세요.');
       r.onsuccess = () => res(r.result);
@@ -133,6 +135,17 @@ const routes = [
   [/^#\/handover$/, 'home', viewHandover],
   [/^#\/notice$/, 'home', viewNotice],
   [/^#\/ai$/, 'home', viewAI], // ai.js
+  // 투자 분석 (invest.js)
+  [/^#\/invest$/, 'home', viewInvest],
+  [/^#\/inv\/new$/, 'home', () => viewInvEdit(null)],
+  [/^#\/inv\/edit\/([\w-]+)$/, 'home', (m) => viewInvEdit(m[1])],
+  [/^#\/inv\/([\w-]+)$/, 'home', (m) => viewInvDetail(m[1])],
+  [/^#\/scens$/, 'home', viewScens],
+  [/^#\/scen\/new$/, 'home', () => viewScen(null)],
+  [/^#\/scen\/([\w-]+)$/, 'home', (m) => viewScen(m[1])],
+  [/^#\/ijournal$/, 'home', viewJournal],
+  [/^#\/ij\/new$/, 'home', () => viewJEdit(null)],
+  [/^#\/ij\/([\w-]+)$/, 'home', (m) => viewJEdit(m[1])],
 ];
 async function render() {
   const h = (location.hash || '#/').split('?')[0]; // ?뒤 값은 각 화면이 직접 읽는다
@@ -302,7 +315,7 @@ async function viewHome() {
         <a class="tile" href="#/jobs"><i>🛠</i>사업 관리</a>
         <a class="tile" href="#/office"><i>🏢</i>관리사무소${oa.open.length ? `<br><small style="color:var(--red)">미처리 ${oa.open.length}</small>` : ''}</a>
         <a class="tile" href="#/ai"><i>🤖</i>AI 비서</a>
-        <span class="tile off"><i>📈</i>투자 분석<br><small>준비 중</small></span>
+        <a class="tile" href="#/invest"><i>📈</i>투자 분석</a>
         <span class="tile off"><i>🏃</i>마라톤<br><small>준비 중</small></span>
         <span class="tile off"><i>🤿</i>프리다이빙<br><small>준비 중</small></span>
       </div>
@@ -1087,15 +1100,15 @@ async function viewSettings() {
 const blobToDataURL = (b) => new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(r.result); r.onerror = () => rej(r.error); r.readAsDataURL(b); });
 async function dataURLToBlob(u) { return (await fetch(u)).blob(); }
 
-const BACKUP_STORES = ['customers', 'jobs', 'payments', 'photos', 'settings', 'tasks', 'notes', 'office', 'schedules'];
+const BACKUP_STORES = ['customers', 'jobs', 'payments', 'photos', 'settings', 'tasks', 'notes', 'office', 'schedules', 'invest'];
 async function exportBackup() {
   toast('백업 파일 만드는 중…');
-  const [customers, jobs, payments, photos, settings, tasks, notes, office, schedules] = await Promise.all(BACKUP_STORES.map((s) => DB.all(s)));
+  const [customers, jobs, payments, photos, settings, tasks, notes, office, schedules, invest] = await Promise.all(BACKUP_STORES.map((s) => DB.all(s)));
   const ph = [];
   for (const p of photos) ph.push({ ...p, blob: undefined, data: await blobToDataURL(p.blob) });
   const nt = [];
   for (const n of notes) nt.push({ ...n, photo: undefined, photoData: n.photo ? await blobToDataURL(n.photo) : '' });
-  const out = { app: 'ONE LIFE AI', version: APP_VERSION, exportedAt: new Date().toISOString(), customers, jobs, payments, settings: settings.filter((s) => s.key !== 'lastBackup'), photos: ph, tasks, notes: nt, office, schedules };
+  const out = { app: 'ONE LIFE AI', version: APP_VERSION, exportedAt: new Date().toISOString(), customers, jobs, payments, settings: settings.filter((s) => s.key !== 'lastBackup'), photos: ph, tasks, notes: nt, office, schedules, invest };
   const blob = new Blob([JSON.stringify(out)], { type: 'application/json' });
   const name = `onelife-backup-${todayStr()}.json`;
   const file = new File([blob], name, { type: 'application/json' });
@@ -1130,6 +1143,7 @@ async function importBackup(text) {
   for (const x of notes) await DB.put('notes', x);
   for (const x of d.office || []) await DB.put('office', x);
   for (const x of d.schedules || []) await DB.put('schedules', x);
+  for (const x of d.invest || []) await DB.put('invest', x);
   await setSetting('lastBackup', Date.now());
 }
 
