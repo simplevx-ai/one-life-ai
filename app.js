@@ -3,7 +3,7 @@
  */
 'use strict';
 
-const APP_VERSION = '0.1.0';
+const APP_VERSION = '0.2.0';
 const STATUSES = ['접수', '견적', '예약', '완료', '취소'];
 const METHODS = ['계좌이체', '현금', '카드', '기타'];
 const PHOTO_KINDS = ['시공 전', '시공 후', '기타'];
@@ -99,6 +99,7 @@ function setTitle(t, back) {
 }
 const opts = (arr, sel) => arr.map((v) => `<option${v === sel ? ' selected' : ''}>${esc(v)}</option>`).join('');
 function paidOf(jobId, pays) { return pays.filter((p) => p.jobId === jobId).reduce((a, p) => a + (Number(p.amount) || 0), 0); }
+const nameOf = (c) => (c && c.name) || (c && c.phone ? `이름 미확인(${digits(c.phone).slice(-4)})` : '이름 미확인');
 
 /* ───────── 라우터 ───────── */
 const routes = [
@@ -137,7 +138,8 @@ function fab(href) {
 /* ───────── 홈 ───────── */
 async function viewHome() {
   setTitle('ONE LIFE AI');
-  const [jobs, pays, custs, lastBackup] = await Promise.all([DB.all('jobs'), DB.all('payments'), DB.all('customers'), getSetting('lastBackup', null)]);
+  const [jobs, pays, custs, lastBackup, sheetCfg, lastSync] = await Promise.all([DB.all('jobs'), DB.all('payments'), DB.all('customers'), getSetting('lastBackup', null), getSetting('sheet', {}), getSetting('lastSync', null)]);
+  const sheetOn = !!(sheetCfg && sheetCfg.url && sheetCfg.key);
   const cmap = Object.fromEntries(custs.map((c) => [c.id, c]));
   const today = todayStr();
   const week = new Date(); week.setDate(week.getDate() + 7);
@@ -154,7 +156,7 @@ async function viewHome() {
 
   const line = (j) => {
     const c = cmap[j.customerId] || {};
-    return `<a class="item" href="#/job/${j.id}"><div class="row spread"><span class="t">${esc(fmtDate(j.scheduledAt))} · ${esc(c.name || '이름 없음')}</span><span class="badge s-${j.status}">${j.status}</span></div>
+    return `<a class="item" href="#/job/${j.id}"><div class="row spread"><span class="t">${esc(fmtDate(j.scheduledAt))} · ${esc(nameOf(c))}</span><span class="badge s-${j.status}">${j.status}</span></div>
       <div class="muted">${esc([j.area || c.area, j.type, j.product].filter(Boolean).join(' · '))}</div></a>`;
   };
 
@@ -177,8 +179,10 @@ async function viewHome() {
       ${upcoming.length ? upcoming.map(line).join('') : '<div class="muted">예약된 작업이 없습니다.</div>'}
     </div>
     <div class="row" style="margin-bottom:12px">
-      <a class="btn primary block" href="#/job/new">+ 새 문의·작업</a>
+      <a class="btn primary block" href="#/job/new" style="flex:2">+ 새 문의·작업</a>
+      ${sheetOn ? '<button class="btn" id="homeSync" type="button" style="flex:1">🔄 시트</button>' : ''}
     </div>
+    ${sheetOn ? `<div class="muted" style="margin:-6px 0 12px;text-align:right">시트 동기화: ${lastSync ? esc(new Date(lastSync).toLocaleString('ko-KR')) : '아직 안 함'}</div>` : ''}
     <div class="card">
       <h2>ONE LIFE 모듈</h2>
       <div class="tiles">
@@ -190,7 +194,8 @@ async function viewHome() {
         <span class="tile off"><i>🤿</i>프리다이빙<br><small>준비 중</small></span>
       </div>
     </div>
-    <div class="muted" style="text-align:center">v${APP_VERSION} · 데이터는 이 폰에만 저장됩니다</div>`;
+    <div class="muted" style="text-align:center">v${APP_VERSION} · 데이터는 이 폰에 저장${sheetOn ? ' · 구글 시트 동기화 켜짐' : ''}</div>`;
+  if (sheetOn) $('#homeSync').onclick = (e) => runSync(e.target);
 }
 
 /* ───────── 작업 목록 ───────── */
@@ -217,7 +222,7 @@ async function viewJobs() {
       const paid = paidOf(j.id, pays);
       const left = (Number(j.quote) || 0) - paid;
       return `<a class="item" href="#/job/${j.id}">
-        <div class="row spread"><span class="t">${esc(c.name || '이름 없음')} <span class="muted">${esc(prettyPhone(c.phone))}</span></span><span class="badge s-${j.status}">${j.status}</span></div>
+        <div class="row spread"><span class="t">${esc(nameOf(c))} <span class="muted">${esc(prettyPhone(c.phone))}</span></span><span class="badge s-${j.status}">${j.status}</span></div>
         <div class="muted">${esc([j.area || c.area, j.type, j.product].filter(Boolean).join(' · ') || '작업 내용 미입력')}</div>
         <div class="muted">${j.scheduledAt ? '예약 ' + esc(fmtDate(j.scheduledAt)) + ' · ' : ''}${j.quote ? '견적 ' + won(j.quote) : ''}${j.status === '완료' && left > 0 ? ` · <b style="color:var(--red)">미수 ${won(left)}</b>` : ''}</div>
       </a>`;
@@ -241,16 +246,21 @@ async function viewJob(id) {
   if (id && !job) { view().innerHTML = '<div class="empty">작업을 찾을 수 없습니다.</div>'; setTitle('작업', true); return; }
   const cust = job ? (await DB.get('customers', job.customerId)) || {} : {};
   const j = job || { status: '접수', source: L.sources[0] };
-  setTitle(job ? (cust.name || '작업') : '새 문의·작업', true);
+  setTitle(job ? nameOf(cust) : '새 문의·작업', true);
   const typeList = j.type && !L.jobTypes.includes(j.type) ? [...L.jobTypes, j.type] : L.jobTypes;
-  const srcList = cust.source && !L.sources.includes(cust.source) ? [...L.sources, cust.source] : L.sources;
+  const curSrc = j.source || cust.source;
+  const srcList = curSrc && !L.sources.includes(curSrc) ? [...L.sources, curSrc] : L.sources;
+  const statusList = j.status && !STATUSES.includes(j.status) ? [...STATUSES, j.status] : STATUSES;
 
   view().innerHTML = `
+    ${job && job.sheetId ? `<div class="card"><div class="row spread"><b>시트 ${esc(job.sheetId)}</b><span class="muted">${job.syncedAt ? '동기화 ' + esc(new Date(job.syncedAt).toLocaleString('ko-KR')) : ''}</span></div>
+      ${job.missing ? `<div class="muted">빠진 항목: ${esc(job.missing)}</div>` : ''}
+      ${job.photoLink ? `<div class="muted">시트의 현장 사진: ${/^https?:\/\//.test(job.photoLink) ? `<a href="${esc(job.photoLink)}" target="_blank" rel="noopener">열기</a>` : esc(job.photoLink)}</div>` : ''}</div>` : ''}
     <form id="jobForm" autocomplete="off">
       <div class="card">
         <h2>고객</h2>
-        <label class="req" for="f_name">이름</label>
-        <input id="f_name" name="name" value="${esc(cust.name)}" placeholder="예: 김OO" required>
+        <label for="f_name">이름 <span class="muted">(이름이나 연락처 중 하나는 필수)</span></label>
+        <input id="f_name" name="name" value="${esc(cust.name)}" placeholder="예: 김OO">
         <label for="f_phone">연락처</label>
         <input id="f_phone" name="phone" type="tel" inputmode="tel" value="${esc(prettyPhone(cust.phone))}" placeholder="010-0000-0000">
         ${cust.phone ? `<div class="row" style="margin-top:8px"><a class="btn small" href="tel:${digits(cust.phone)}">📞 전화</a><a class="btn small" href="sms:${digits(cust.phone)}">💬 문자</a></div>` : ''}
@@ -259,23 +269,27 @@ async function viewJob(id) {
         <label for="f_address">상세 주소</label>
         <input id="f_address" name="address" value="${esc(j.address || cust.address)}" placeholder="동·호수 등">
         <label for="f_source">유입 경로</label>
-        <select id="f_source" name="source">${opts(srcList, j.source || cust.source)}</select>
+        <select id="f_source" name="source">${opts(srcList, curSrc)}</select>
       </div>
       <div class="card">
         <h2>작업</h2>
         <label for="f_status">상태</label>
-        <select id="f_status" name="status">${opts(STATUSES, j.status)}</select>
+        <select id="f_status" name="status">${opts(statusList, j.status)}</select>
         <label for="f_type">작업 종류</label>
         <select id="f_type" name="type">${opts(typeList, j.type)}</select>
         <label for="f_product">제품·크기·수량</label>
         <input id="f_product" name="product" value="${esc(j.product)}" placeholder="예: 미세방충망 1200×1500 3개">
         <div class="grid2">
-          <div><label for="f_wish">희망 날짜</label><input id="f_wish" name="wishDate" type="date" value="${esc(j.wishDate)}"></div>
+          <div><label for="f_wish">희망 일정</label><input id="f_wish" name="wishDate" value="${esc(j.wishDate)}" placeholder="예: 11/25 오전"></div>
           <div><label for="f_sched">예약 일시</label><input id="f_sched" name="scheduledAt" type="datetime-local" value="${esc(j.scheduledAt)}"></div>
         </div>
         <label for="f_quote">견적 금액(원)</label>
         <input id="f_quote" name="quote" type="number" inputmode="numeric" min="0" step="1000" value="${esc(j.quote)}" placeholder="0">
-        <label for="f_memo">메모(고객이 말한 내용·확인할 것)</label>
+        <label for="f_summary">고객이 말한 내용(요약)</label>
+        <textarea id="f_summary" name="summary">${esc(j.summary)}</textarea>
+        <label for="f_check">추가 확인 사항</label>
+        <input id="f_check" name="check" value="${esc(j.check)}" placeholder="예: 사진 받기, 방문 실측 필요">
+        <label for="f_memo">메모</label>
         <textarea id="f_memo" name="memo">${esc(j.memo)}</textarea>
       </div>
       <div class="card">
@@ -327,7 +341,7 @@ async function viewJob(id) {
   $('#jobForm').onsubmit = async (e) => {
     e.preventDefault();
     const f = Object.fromEntries(new FormData(e.target).entries());
-    if (!f.name.trim()) { toast('이름을 넣어 주세요'); return; }
+    if (!f.name.trim() && !digits(f.phone)) { toast('이름이나 연락처를 넣어 주세요'); return; }
     const now = new Date().toISOString();
     // 고객: 기존 작업이면 그 고객을 고치고, 새 작업이면 같은 전화번호 고객을 찾아 연결
     let c = job ? cust : null;
@@ -340,7 +354,7 @@ async function viewJob(id) {
     const data = {
       ...(job || { id: uid(), createdAt: now }),
       customerId: c.id, status: f.status, type: f.type, product: f.product.trim(), area: f.area.trim(), address: f.address.trim(), source: f.source,
-      wishDate: f.wishDate, scheduledAt: f.scheduledAt, quote: f.quote === '' ? '' : Number(f.quote), memo: f.memo.trim(),
+      wishDate: f.wishDate, scheduledAt: f.scheduledAt, quote: f.quote === '' ? '' : Number(f.quote), memo: f.memo.trim(), summary: f.summary.trim(), check: f.check.trim(),
       problem: f.problem.trim(), solution: f.solution.trim(), duration: f.duration.trim(), keywords: f.keywords.trim(), blogUrl: f.blogUrl.trim(),
       updatedAt: now,
     };
@@ -493,7 +507,7 @@ async function viewCustomers() {
     $('#custList').innerHTML = list.length ? list.map((c) => {
       const js = jobs.filter((j) => j.customerId === c.id);
       const total = js.reduce((a, j) => a + paidOf(j.id, pays), 0);
-      return `<a class="item" href="#/customer/${c.id}"><div class="row spread"><span class="t">${esc(c.name)}</span><span class="muted">${js.length}건 · ${won(total)}</span></div>
+      return `<a class="item" href="#/customer/${c.id}"><div class="row spread"><span class="t">${esc(nameOf(c))}</span><span class="muted">${js.length}건 · ${won(total)}</span></div>
         <div class="muted">${esc([prettyPhone(c.phone), c.area].filter(Boolean).join(' · '))}</div></a>`;
     }).join('') : '<div class="empty">고객이 없습니다. 작업을 저장하면 자동으로 생깁니다.</div>';
   }
@@ -505,14 +519,14 @@ async function viewCustomers() {
 
 async function viewCustomer(id) {
   const c = await DB.get('customers', id);
-  setTitle(c ? c.name : '고객', true);
+  setTitle(c ? nameOf(c) : '고객', true);
   if (!c) { view().innerHTML = '<div class="empty">고객을 찾을 수 없습니다.</div>'; return; }
   const [jobs, pays] = await Promise.all([DB.by('jobs', 'customerId', id), DB.all('payments')]);
   jobs.sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
   const total = jobs.reduce((a, j) => a + paidOf(j.id, pays), 0);
   view().innerHTML = `
     <div class="card">
-      <div class="t" style="font-size:20px;font-weight:800">${esc(c.name)}</div>
+      <div class="t" style="font-size:20px;font-weight:800">${esc(nameOf(c))}</div>
       <div class="muted">${esc([prettyPhone(c.phone), c.area, c.address].filter(Boolean).join(' · '))}</div>
       <div class="muted">유입: ${esc(c.source || '-')} · 작업 ${jobs.length}건 · 받은 금액 ${won(total)}</div>
       ${c.phone ? `<div class="row" style="margin-top:10px"><a class="btn small" href="tel:${digits(c.phone)}">📞 전화</a><a class="btn small" href="sms:${digits(c.phone)}">💬 문자</a></div>` : ''}
@@ -544,7 +558,7 @@ async function viewSales() {
     const list = pays.filter((p) => (p.date || '').startsWith(sel)).sort((a, b) => (b.date || '').localeCompare(a.date || ''));
     $('#payList').innerHTML = list.length ? `<table><thead><tr><th>날짜</th><th>고객·작업</th><th class="r">금액</th></tr></thead><tbody>${list.map((p) => {
       const j = jmap[p.jobId] || {}; const c = cmap[j.customerId] || {};
-      return `<tr onclick="location.hash='#/job/${p.jobId}'" style="cursor:pointer"><td>${esc(fmtDate(p.date))}</td><td>${esc(c.name || '-')} · ${esc(j.type || '')}<div class="muted">${esc(p.method)}</div></td><td class="r">${won(p.amount)}</td></tr>`;
+      return `<tr onclick="location.hash='#/job/${p.jobId}'" style="cursor:pointer"><td>${esc(fmtDate(p.date))}</td><td>${esc(nameOf(c))} · ${esc(j.type || '')}<div class="muted">${esc(p.method)}</div></td><td class="r">${won(p.amount)}</td></tr>`;
     }).join('')}</tbody></table>` : '<div class="muted">이 달 입금 기록이 없습니다.</div>';
     $('#selTotal').textContent = won(months[sel] || 0);
     document.querySelectorAll('#monthChips .chip').forEach((c) => c.classList.toggle('on', c.dataset.m === sel));
@@ -559,10 +573,155 @@ async function viewSales() {
     <div class="chips" id="monthChips">${(keys.length ? keys : [sel]).map((m) => `<button class="chip" data-m="${m}">${m}</button>`).join('')}</div>
     <div class="card"><h2>입금 내역</h2><div id="payList"></div></div>
     <div class="card"><h2>미수금 (완료했지만 덜 받은 작업)</h2>
-      ${unpaid.length ? unpaid.map(({ j, left }) => `<a class="item" href="#/job/${j.id}"><div class="row spread"><span class="t">${esc((cmap[j.customerId] || {}).name || '-')}</span><b style="color:var(--red)">${won(left)}</b></div><div class="muted">${esc([j.type, j.area].filter(Boolean).join(' · '))}</div></a>`).join('') : '<div class="muted">미수금이 없습니다.</div>'}
+      ${unpaid.length ? unpaid.map(({ j, left }) => `<a class="item" href="#/job/${j.id}"><div class="row spread"><span class="t">${esc(nameOf(cmap[j.customerId]))}</span><b style="color:var(--red)">${won(left)}</b></div><div class="muted">${esc([j.type, j.area].filter(Boolean).join(' · '))}</div></a>`).join('') : '<div class="muted">미수금이 없습니다.</div>'}
     </div>`;
   $('#monthChips').onclick = (e) => { const b = e.target.closest('.chip'); if (!b) return; sel = b.dataset.m; draw(); };
   draw();
+}
+
+/* ───────── 구글 시트 동기화 (2단계) ─────────
+ * 시트 '문의' 탭 ↔ 앱 작업. 마지막 동기화 때 값(sheetBase)을 기억해 3자 비교:
+ *  앱만 바뀜 → 앱 값을 시트로 / 시트만 바뀜 → 시트 값을 앱으로 / 둘 다 바뀜 → 앱 우선(메모는 두 쪽 줄을 합침)
+ * 완료 작업의 블로그 자료는 '작업사례' 탭으로 보낸다. 고객 상세 주소는 시트로 보내지 않는다.
+ */
+const SHEET_KEYS = ['C', 'D', 'E', 'F', 'G', 'H', 'J', 'L', 'M', 'N', 'O'];
+const normV = (k, v) => (k === 'D' ? digits(v) : String(v ?? '').replace(/\r/g, '').trim());
+function appVals(j, c) {
+  return { C: c.name || '', D: prettyPhone(c.phone) || '', E: j.area || '', F: j.type || '', G: j.product || '', H: j.wishDate || '', J: j.check || '', L: j.source || '', M: j.status || '', N: j.summary || '', O: j.memo || '' };
+}
+const rowVals = (r) => ({ C: r[2], D: r[3], E: r[4], F: r[5], G: r[6], H: r[7], J: r[9], L: r[11], M: r[12], N: r[13], O: r[14] });
+function applyVals(j, c, v) {
+  c.name = v.C || c.name || ''; c.phone = digits(v.D) || c.phone || ''; j.area = v.E; c.area = c.area || v.E; j.type = v.F; j.product = v.G; j.wishDate = v.H;
+  j.check = v.J; j.source = v.L; c.source = c.source || v.L; j.status = v.M; j.summary = v.N; j.memo = v.O;
+}
+function mergeLines(a, b) {
+  const have = new Set(String(a).split('\n').map((x) => x.trim()));
+  const add = String(b).split('\n').filter((x) => x.trim() && !have.has(x.trim()));
+  return [a, ...add].filter(Boolean).join('\n');
+}
+function missingOf(v, photoCount, photoLink) {
+  const m = [];
+  if (!v.C) m.push('고객 이름');
+  if (!v.E) m.push('작업 지역');
+  if (!v.F) m.push('작업 종류');
+  if (!v.G) m.push('제품·작업 크기');
+  if (!v.H) m.push('희망 날짜');
+  if (!photoCount && !photoLink) m.push('현장 사진');
+  return m.join(', ');
+}
+const sheetTime = (s) => (s && /^\d{4}-\d{2}-\d{2}/.test(s) ? s.slice(0, 16).replace(' ', 'T') : '');
+const isoToSheet = (s) => (s ? s.slice(0, 16).replace('T', ' ') : '');
+
+async function callSheet(action, extra) {
+  const cfg = await getSetting('sheet', {});
+  if (!cfg.url || !cfg.key) throw new Error('설정에서 시트 웹 앱 주소와 비밀 키를 먼저 넣어 주세요');
+  let r;
+  try {
+    // kind '연결 테스트'를 같이 보내 옛 스크립트(v1)가 시트에 줄을 추가하지 않게 한다
+    r = await fetch(cfg.url, { method: 'POST', body: JSON.stringify({ key: cfg.key, kind: '연결 테스트', action, ...extra }) });
+  } catch { throw new Error('인터넷 연결이나 웹 앱 주소를 확인하세요'); }
+  const t = await r.text();
+  if (t.trim() === 'test ok') throw new Error('시트 스크립트가 옛 버전입니다. 새 코드로 바꾸고 새 버전으로 배포해 주세요');
+  if (t.trim() === 'denied') throw new Error('비밀 키가 다릅니다');
+  let d;
+  try { d = JSON.parse(t); } catch { throw new Error('시트 응답을 읽지 못했습니다(웹 앱 주소·배포 설정 확인)'); }
+  if (!d.ok) throw new Error(d.error === 'denied' ? '비밀 키가 다릅니다' : d.error || '시트 오류');
+  return d;
+}
+
+async function syncSheet() {
+  const ping = await callSheet('ping');
+  if (!ping.version || ping.version < 2) throw new Error('시트 스크립트를 새 버전으로 바꿔 주세요');
+  const { rows } = await callSheet('pull');
+  const [jobs, custs, photos] = await Promise.all([DB.all('jobs'), DB.all('customers'), DB.all('photos')]);
+  const cmap = Object.fromEntries(custs.map((c) => [c.id, c]));
+  const photoCnt = (id) => photos.filter((p) => p.jobId === id).length;
+  const byId = Object.fromEntries(jobs.filter((j) => j.sheetId).map((j) => [j.sheetId, j]));
+  const now = new Date().toISOString();
+  const updates = [], appends = [], cases = [], touched = new Map();
+  let created = 0, fromSheet = 0;
+
+  for (const r of rows) {
+    const sv = rowVals(r);
+    let j = byId[r[0]];
+    if (!j) {
+      // 아직 연결 안 된 시트 줄: 같은 번호의 진행 중 앱 작업이 있으면 연결, 없으면 새로 만든다
+      const ph = digits(r[3]);
+      j = ph && jobs.find((x) => !x.sheetId && !touched.has(x.id) && ['접수', '견적', '예약'].includes(x.status) && digits((cmap[x.customerId] || {}).phone) === ph);
+      if (j) { j.sheetId = r[0]; j.sheetBase = null; }
+      else {
+        let c = ph ? custs.find((x) => digits(x.phone) === ph) : null;
+        if (!c) { c = { id: uid(), createdAt: now, name: '', phone: '', area: '', source: '' }; custs.push(c); cmap[c.id] = c; }
+        j = { id: uid(), createdAt: sheetTime(r[1]) || now, customerId: c.id, sheetId: r[0], status: '접수' };
+        applyVals(j, c, sv);
+        j.sheetBase = sv; j.photoLink = r[8]; j.missing = r[10]; j.syncedAt = now; j.updatedAt = now;
+        jobs.push(j); touched.set(j.id, c); created++;
+        continue;
+      }
+    }
+    const c = cmap[j.customerId] || (cmap[j.customerId] = { id: j.customerId, createdAt: now });
+    const av = appVals(j, c), base = j.sheetBase || {}, res = {}, cols = {};
+    let sheetWon = false;
+    for (const k of SHEET_KEYS) {
+      const a = av[k], s = sv[k] ?? '', b = base[k];
+      let v;
+      if (normV(k, a) === normV(k, s)) v = a;
+      else if (!j.sheetBase) v = k === 'O' || k === 'N' ? mergeLines(a, s) : a || s; // 처음 연결: 메모·요약은 합치고, 나머지는 앱 값 우선(비었으면 시트 값)
+      else if (normV(k, a) === normV(k, b)) { v = s; sheetWon = true; } // 시트에서만 바뀜
+      else if (normV(k, s) === normV(k, b)) v = a; // 앱에서만 바뀜
+      else v = k === 'O' ? mergeLines(a, s) : a; // 둘 다 바뀜
+      res[k] = v;
+      if (normV(k, v) !== normV(k, s)) cols[k] = v;
+      if (normV(k, v) !== normV(k, a)) sheetWon = true;
+    }
+    const miss = missingOf(res, photoCnt(j.id), r[8]);
+    if (miss !== r[10]) cols.K = miss;
+    if (Object.keys(cols).length) updates.push({ id: r[0], cols });
+    if (sheetWon) { applyVals(j, c, res); fromSheet++; }
+    j.sheetBase = res; j.photoLink = r[8]; j.missing = miss; j.syncedAt = now;
+    touched.set(j.id, c);
+  }
+
+  // 시트에 없는 앱 작업 → 새 줄로 추가
+  for (const j of jobs) {
+    if (j.sheetId) continue;
+    const c = cmap[j.customerId] || {};
+    const v = appVals(j, c), miss = missingOf(v, photoCnt(j.id), '');
+    appends.push({ tmp: j.id, row: [isoToSheet(j.createdAt), v.C, v.D, v.E, v.F, v.G, v.H, '', v.J, miss, v.L, v.M, v.N, v.O] });
+    j.sheetBase = v; j.missing = miss; j.syncedAt = now;
+    touched.set(j.id, c);
+  }
+
+  // 완료 작업의 블로그 자료 → 작업사례
+  for (const j of jobs) {
+    if (j.status !== '완료' || !(j.problem || j.solution || j.keywords || j.blogUrl)) continue;
+    cases.push({
+      inquiryId: j.sheetId || '', tmp: j.sheetId ? '' : j.id,
+      row: { date: (j.scheduledAt || j.doneAt || '').slice(0, 10), area: j.area || '', type: j.type || '', product: j.product || '', duration: j.duration || '', problem: j.problem || '', solution: j.solution || '', keywords: j.keywords || '', published: j.blogUrl ? 'Y' : 'N', url: j.blogUrl || '' },
+    });
+  }
+
+  const res = await callSheet('push', { updates, appends, cases });
+  for (const a of res.appended || []) { const j = jobs.find((x) => x.id === a.tmp); if (j) j.sheetId = a.id; }
+  for (const [id, c] of touched) {
+    const j = jobs.find((x) => x.id === id);
+    if (c && c.id) await DB.put('customers', c);
+    await DB.put('jobs', j);
+  }
+  await setSetting('lastSync', Date.now());
+  return { created, fromSheet, sent: updates.length, added: (res.appended || []).length, cases: res.cases || 0 };
+}
+
+async function runSync(btn) {
+  if (btn) { btn.disabled = true; btn.textContent = '동기화 중…'; }
+  try {
+    const r = await syncSheet();
+    toast(`동기화 완료: 새로 가져옴 ${r.created} · 시트 반영 ${r.fromSheet} · 시트로 보냄 ${r.sent + r.added} · 작업사례 ${r.cases}`);
+    render();
+  } catch (e) {
+    alert('동기화 실패: ' + e.message);
+    if (btn) { btn.disabled = false; btn.textContent = '🔄 구글 시트 동기화'; }
+  }
 }
 
 /* ───────── 설정·백업 ───────── */
@@ -573,7 +732,22 @@ async function viewSettings() {
   let usage = '';
   try { const e = await navigator.storage.estimate(); usage = `${(e.usage / 1048576).toFixed(1)}MB 사용`; } catch { /* 미지원 */ }
   const persisted = navigator.storage && navigator.storage.persisted ? await navigator.storage.persisted() : false;
+  const sheetCfg = await getSetting('sheet', {});
+  const lastSync = await getSetting('lastSync', null);
   view().innerHTML = `
+    <div class="card">
+      <h2>구글 시트 연결 <span class="muted">(선택)</span></h2>
+      <div class="muted">'Google Sheet DB'의 문의 탭과 작업을 주고받습니다. NO.1 콜백으로 들어온 문의도 여기로 들어옵니다.</div>
+      <label for="s_url">웹 앱 주소</label>
+      <input id="s_url" value="${esc(sheetCfg.url)}" placeholder="https://script.google.com/macros/s/.../exec">
+      <label for="s_key">비밀 키</label>
+      <input id="s_key" type="password" value="${esc(sheetCfg.key)}" placeholder="텔레그램으로 받은 키">
+      <div class="row" style="margin-top:10px">
+        <button class="btn" id="s_save" type="button">💾 저장·연결 확인</button>
+        <button class="btn primary" id="s_sync" type="button">🔄 지금 동기화</button>
+      </div>
+      <div class="muted" style="margin-top:6px">마지막 동기화: ${lastSync ? new Date(lastSync).toLocaleString('ko-KR') : '없음'}</div>
+    </div>
     <div class="card">
       <h2>백업 (꼭 해 주세요)</h2>
       <div class="muted">데이터는 이 폰에만 있습니다. 백업 파일을 받아 구글 드라이브·PC 등에 보관하세요.</div>
@@ -600,6 +774,18 @@ async function viewSettings() {
     if (!jobTypes.length || !sources.length) { toast('목록이 비어 있습니다'); return; }
     await setSetting('lists', { jobTypes, sources });
     toast('목록을 저장했습니다');
+  };
+  $('#s_save').onclick = async () => {
+    const url = $('#s_url').value.trim(), key = $('#s_key').value.trim();
+    if (url && !/^https:\/\/script\.google\.com\/macros\/s\/[\w-]+\/exec$/.test(url)) { toast('웹 앱 주소 형식이 아닙니다(…/exec 로 끝나야 함)'); return; }
+    await setSetting('sheet', { url, key });
+    if (!url) { toast('시트 연결을 껐습니다'); return; }
+    try { const p = await callSheet('ping'); toast(p.version >= 2 ? '✅ 시트 연결 확인' : '시트 스크립트를 새 버전으로 바꿔 주세요'); }
+    catch (e) { alert('연결 실패: ' + e.message); }
+  };
+  $('#s_sync').onclick = async (e) => {
+    await setSetting('sheet', { url: $('#s_url').value.trim(), key: $('#s_key').value.trim() });
+    runSync(e.target);
   };
   $('#exportBtn').onclick = exportBackup;
   $('#importIn').onchange = async (e) => {
