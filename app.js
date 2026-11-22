@@ -3,7 +3,7 @@
  */
 'use strict';
 
-const APP_VERSION = '0.11.0';
+const APP_VERSION = '0.11.1';
 const STATUSES = ['접수', '견적', '예약', '완료', '취소'];
 const METHODS = ['계좌이체', '현금', '카드', '기타'];
 const PHOTO_KINDS = ['시공 전', '시공 후', '기타', '고객 사진'];
@@ -77,7 +77,10 @@ async function getSetting(key, def) {
 const setSetting = (key, value) => DB.put('settings', { key, value });
 async function lists() {
   const l = await getSetting('lists', null);
-  return { ...DEFAULT_LISTS, ...(l || {}) };
+  const out = { ...DEFAULT_LISTS, ...(l || {}) };
+  const oldDefault = ['방충망 교체', '방충망 수리', '안전방충망', 'TV 설치', '타일', '기타'];
+  if (l && l.jobTypes) out.jobTypes = [...new Set([...DEFAULT_LISTS.jobTypes.filter((t) => t !== '기타'), ...l.jobTypes.filter((t) => !oldDefault.includes(t) || t === '기타'), '기타'])];
+  return out;
 }
 
 /* ───────── 도우미 ───────── */
@@ -297,7 +300,12 @@ async function viewHome() {
     .sort((a, b) => (a.done - b.done) || (a.date || '').localeCompare(b.date || '') || (a.createdAt || '').localeCompare(b.createdAt || ''));
   const openTasks = dayTasks.filter((t) => !t.done).length;
   const notesToday = notes.filter((n) => (n.createdAt || '').slice(0, 10) === today).length;
-  const alerts = [...buildAlerts({ jobs, pays, tasks, cmap, today, needBackup, daysSinceBackup, oa }), ...spAl.map((a) => ({ lv: 'info', ...a }))];
+  // 현장노트: 내일 일정(전날 알림)·연락할 고객
+  const tmrJobs = jobs.filter((j) => j.status !== '취소' && (j.scheduledAt || '').slice(0, 10) === addDays(1));
+  const contacts = contactList(jobs, custs);
+  const bizAl = [...(tmrJobs.length ? [{ lv: 'info', icon: '🔔', text: `내일 작업 ${tmrJobs.length}건: ${tmrJobs.map((j) => `${(j.scheduledAt || '').slice(11, 16)} ${nameOf(cmap[j.customerId])}`).join(', ')}`, href: '#/biz' }] : []),
+    ...(contacts.length ? [{ lv: 'info', icon: '☎️', text: `연락할 고객 ${contacts.length}명 (${contacts.slice(0, 2).map((x) => nameOf(x.c)).join(', ')}${contacts.length > 2 ? ' 외' : ''})`, href: '#/biz' }] : [])];
+  const alerts = [...buildAlerts({ jobs, pays, tasks, cmap, today, needBackup, daysSinceBackup, oa }), ...bizAl, ...spAl.map((a) => ({ lv: 'info', ...a }))];
   const brief = buildBriefing({ todayJobs, waiting, overdue, monthSales, unpaid, openTasks, notesToday, oa });
 
   const jobLine = (j, showDate) => {
@@ -602,7 +610,8 @@ async function viewJob(id) {
   const L = await lists();
   const job = id ? await DB.get('jobs', id) : null;
   if (id && !job) { view().innerHTML = '<div class="empty">작업을 찾을 수 없습니다.</div>'; setTitle('작업', true); return; }
-  const cust = job ? (await DB.get('customers', job.customerId)) || {} : {};
+  const preC = !job && new URLSearchParams(location.hash.split('?')[1] || '').get('c');
+  const cust = job ? (await DB.get('customers', job.customerId)) || {} : (preC ? (await DB.get('customers', preC)) || {} : {});
   const j = job || { status: '접수', source: L.sources[0] };
   setTitle(job ? nameOf(cust) : '새 문의·작업', true);
   const typeList = j.type && !L.jobTypes.includes(j.type) ? [...L.jobTypes, j.type] : L.jobTypes;
@@ -617,6 +626,7 @@ async function viewJob(id) {
     <form id="jobForm" autocomplete="off">
       <div class="card">
         <h2>고객</h2>
+        ${!job ? `<label for="f_find">기존 고객 찾기</label><input id="f_find" type="search" placeholder="이름·전화·아파트로 검색"><div id="f_found"></div>` : ''}
         <label for="f_name">이름 <span class="muted">(이름이나 연락처 중 하나는 필수)</span></label>
         <input id="f_name" name="name" value="${esc(cust.name)}" placeholder="예: 김OO">
         <label for="f_phone">연락처</label>
@@ -696,7 +706,22 @@ async function viewJob(id) {
     <button class="btn danger block" id="delJob" type="button">작업 삭제</button>` : ''}`;
 
   $('#f_phone').addEventListener('blur', (e) => { e.target.value = prettyPhone(e.target.value); });
-  $('#f_sched').addEventListener('change', (e) => { if (e.target.value && $('#f_status').value !== '완료') $('#f_status').value = '예약'; });
+  $('#f_sched').addEventListener('change', async (e) => {
+    if (e.target.value && $('#f_status').value !== '완료') $('#f_status').value = '예약';
+    if (e.target.value && isOfficeDay(await bizCfg(), e.target.value.slice(0, 10))) toast('🏢 이날은 관리사무소 근무일입니다');
+  });
+  if ($('#f_find')) {
+    const all = await DB.all('customers');
+    $('#f_find').oninput = (e) => {
+      const q = e.target.value.trim().toLowerCase();
+      const hit = q ? all.filter((x) => [x.name, x.phone, digits(x.phone), x.area, x.address].join(' ').toLowerCase().includes(q)).slice(0, 6) : [];
+      $('#f_found').innerHTML = hit.map((x) => `<button class="btn small block" data-cid="${x.id}" type="button" style="margin-top:4px;justify-content:flex-start">👤 ${esc(nameOf(x))} · ${esc(prettyPhone(x.phone))} · ${esc(x.area || '')}</button>`).join('');
+      $('#f_found').querySelectorAll('[data-cid]').forEach((b) => { b.onclick = () => {
+        const x = all.find((y) => y.id === b.dataset.cid); Object.assign(cust, x);
+        $('#f_name').value = x.name || ''; $('#f_phone').value = prettyPhone(x.phone); $('#f_area').value = x.area || ''; $('#f_address').value = x.address || '';
+        $('#f_found').innerHTML = `<div class="muted">✅ ${esc(nameOf(x))} 고객으로 접수합니다</div>`; $('#f_find').value = ''; }; });
+    };
+  }
 
   $('#jobForm').onsubmit = async (e) => {
     e.preventDefault();
@@ -704,7 +729,7 @@ async function viewJob(id) {
     if (!f.name.trim() && !digits(f.phone)) { toast('이름이나 연락처를 넣어 주세요'); return; }
     const now = nowISO();
     // 고객: 기존 작업이면 그 고객을 고치고, 새 작업이면 같은 전화번호 고객을 찾아 연결
-    let c = job ? cust : null;
+    let c = job ? cust : (cust.id ? cust : null);
     if (!c || !c.id) {
       const ph = digits(f.phone);
       if (ph) c = (await DB.all('customers')).find((x) => digits(x.phone) === ph) || null;
@@ -784,6 +809,8 @@ async function viewJob(id) {
     await DB.put('payments', { id: uid(), jobId: job.id, amount: amt, date: $('#p_date').value || todayStr(), method: $('#p_method').value, createdAt: nowISO() });
     $('#p_amt').value = '';
     toast('입금 기록했습니다');
+    { const jj = await DB.get('jobs', job.id); const paidNow = (await DB.by('payments', 'jobId', job.id)).reduce((a, p) => a + (+p.amount || 0), 0);
+      if (+jj.quote > 0 && paidNow >= +jj.quote && jj.status !== '완료' && confirm('입금이 다 됐습니다. 작업을 완료로 바꿀까요?')) { await DB.put('jobs', { ...jj, status: '완료', doneAt: jj.doneAt || nowISO(), updatedAt: nowISO() }); render(); return; } }
     drawPays();
   };
   drawPays();
@@ -843,6 +870,7 @@ function openViewer(p, url, after) {
     <button class="btn small" data-a="close" type="button">닫기</button>
     <select data-a="kind" style="width:auto">${opts(PHOTO_KINDS, p.kind)}</select>
     <button class="btn small" data-a="share" type="button">공유</button>
+    <button class="btn small" data-a="mark" type="button">✏️ 표시</button>
     <button class="btn small danger" data-a="del" type="button">삭제</button></div>`;
   document.body.appendChild(v);
   const close = () => v.remove();
@@ -854,6 +882,7 @@ function openViewer(p, url, after) {
     else toast('이 기기는 공유를 지원하지 않습니다');
   };
   v.querySelector('[data-a=del]').onclick = async () => { if (confirm('이 사진을 지울까요?')) { await DB.del('photos', p.id); close(); after(); } };
+  v.querySelector('[data-a=mark]').onclick = () => { close(); markPhoto(p, after); };
 }
 
 /* ───────── 고객 ───────── */

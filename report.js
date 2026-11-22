@@ -31,6 +31,16 @@ const REPORT_TPL = {
     work: '손상된 타일을 걷어내고 새 타일({product})로 시공한 뒤 줄눈까지 마감했습니다.',
     care: '시공 직후에는 줄눈이 굳을 때까지 하루 정도 물 사용과 강한 충격을 피해 주세요.',
   },
+  '컴퓨터': {
+    before: '컴퓨터 상태와 증상을 확인했습니다.',
+    work: '증상을 점검하고 필요한 작업({product})을 진행한 뒤 정상 작동을 확인했습니다.',
+    care: '중요한 자료는 주기적으로 백업해 주세요. 1년에 한 번 점검·청소를 권해 드립니다.',
+  },
+  'LED 시계': {
+    before: '설치할 위치와 벽 상태, 전원 위치를 확인했습니다.',
+    work: 'LED 시계({product})를 수평에 맞춰 단단히 고정하고, 전원 연결과 표시 설정까지 마쳤습니다.',
+    care: '정전 뒤 시간이 맞지 않으면 설명서대로 다시 맞춰 주세요. 보증 기간 안의 고장은 연락 주시면 바로 확인해 드립니다.',
+  },
   '기타': {
     before: '현장 상태를 확인했습니다.',
     work: '요청하신 작업({product})을 진행했습니다.',
@@ -47,7 +57,9 @@ async function bizInfo() {
 
 /* 자동 작성 */
 function autoReport(j, c, photos, biz) {
-  const tpl = REPORT_TPL[j.type] || REPORT_TPL['기타'];
+  // 작업 종류 이름이 달라도(예: '방충망', 'TV 설치', '타일 복원') 맞는 틀을 찾는다
+  const k = typeof typeKey === 'function' ? typeKey(j.type) : '';
+  const tpl = REPORT_TPL[j.type] || REPORT_TPL[{ '방충망': '방충망 교체', 'TV': 'TV 설치', '타일 복원': '타일' }[k] || k] || REPORT_TPL['기타'];
   const date = (j.scheduledAt || j.doneAt || j.updatedAt || nowISO()).slice(0, 10);
   const nb = photos.filter((p) => p.kind === '시공 전').length, na = photos.filter((p) => p.kind === '시공 후').length;
   return {

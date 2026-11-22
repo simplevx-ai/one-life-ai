@@ -288,7 +288,7 @@ async function viewEstimate(id) {
 }
 async function renderEstImage(kind, e, T, j, c, b, paid) {
   const W = 1080, P = 60, F = '"Malgun Gothic","Apple SD Gothic Neo",sans-serif';
-  const rows = e.lines.filter((l) => l.name);
+  const rows = e.lines.filter((l) => l.name && (+l.qty || 0) * (+l.price || 0) > 0); // 금액 0인 줄은 고객용 문서에서 뺀다
   const H = 420 + rows.length * 64 + 360 + (e.note ? 60 : 0);
   const cv = document.createElement('canvas'); cv.width = W; cv.height = H;
   const g = cv.getContext('2d');
