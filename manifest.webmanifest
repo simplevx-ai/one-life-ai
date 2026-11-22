@@ -1,0 +1,16 @@
+{
+  "name": "ONE LIFE AI",
+  "short_name": "ONE LIFE",
+  "description": "개인 업무·생활 통합 관리 — 홈 + 사업 관리",
+  "lang": "ko",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#0B1F4B",
+  "theme_color": "#0B1F4B",
+  "icons": [
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "icons/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}

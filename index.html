@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#0B1F4B">
+  <meta name="description" content="ONE LIFE AI — 개인 업무·생활 통합 관리">
+  <title>ONE LIFE AI</title>
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icons/icon-192.png">
+  <link rel="apple-touch-icon" href="icons/icon-192.png">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="top">
+    <button class="back" id="backBtn" aria-label="뒤로" hidden>‹</button>
+    <h1 id="title">ONE LIFE AI</h1>
+  </header>
+  <main id="view" aria-live="polite"></main>
+  <nav class="tabs" aria-label="메뉴">
+    <a href="#/" data-tab="home"><span>🏠</span>홈</a>
+    <a href="#/jobs" data-tab="jobs"><span>🛠</span>작업</a>
+    <a href="#/customers" data-tab="customers"><span>👤</span>고객</a>
+    <a href="#/sales" data-tab="sales"><span>💰</span>매출</a>
+    <a href="#/settings" data-tab="settings"><span>⚙️</span>설정</a>
+  </nav>
+  <div id="toast" role="status"></div>
+  <script src="app.js"></script>
+</body>
+</html>
