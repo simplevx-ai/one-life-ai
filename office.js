@@ -87,11 +87,12 @@ function schedNext(s) {
 }
 function officeAlerts(recs, scheds) {
   const today = todayStr(), soon = addDays(7);
-  const open = recs.filter((r) => !r.done);
+  const open = recs.filter((r) => !r.done && r.kind !== '점검실행' && r.kind !== '일지');
   return {
     open,
     late: open.filter((r) => r.due && r.due < today),
     dueToday: open.filter((r) => r.due === today),
+    cmpLate: open.filter((r) => r.kind === '민원' && r.createdAt && (Date.now() - new Date(r.createdAt).getTime()) / 864e5 >= 3),
     schedDue: scheds.map((s) => ({ ...s, next: schedNext(s) })).filter((s) => s.next <= soon).sort((a, b) => a.next.localeCompare(b.next)),
   };
 }
@@ -99,56 +100,21 @@ function officeAlerts(recs, scheds) {
 function recLine(r) {
   const today = todayStr();
   const badge = r.done ? '<span class="badge s-완료">완료</span>' : `<span class="badge ${r.due && r.due < today ? '' : 's-예약'}" style="${r.due && r.due < today ? 'color:var(--red)' : ''}">${r.due ? '기한 ' + esc(fmtDate(r.due)) : '미완료'}</span>`;
-  return `<a class="item" href="#/orec/${r.id}"><div class="row spread"><span class="t">${esc(r.loc || r.unit || '위치 미입력')}</span>${badge}</div>
+  return `<a class="item" href="#/${r.kind === '업체 작업' ? 'vwork' : 'orec'}/${r.id}"><div class="row spread"><span class="t">${esc(r.loc || r.unit || '위치 미입력')}</span>${badge}</div>
     <div class="muted">${esc([r.kind, r.cat, r.status, r.action].filter(Boolean).join(' · '))}</div>
     <div style="font-size:14px;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical">${esc(r.text)}</div></a>`;
-}
-
-async function viewOffice() {
-  setTitle('관리사무소', true);
-  const { recs, scheds } = await officeData();
-  const al = officeAlerts(recs, scheds);
-  const today = todayStr();
-  const todayCnt = recs.filter((r) => (r.createdAt || '').slice(0, 10) === today).length;
-  const openSorted = al.open.sort((a, b) => (a.due || '9').localeCompare(b.due || '9') || (b.createdAt || '').localeCompare(a.createdAt || ''));
-  view().innerHTML = `
-    <div class="grid2" style="grid-template-columns:repeat(3,1fr);margin-bottom:12px">
-      <a class="stat ${al.late.length ? 'warn' : ''}" href="#/orecs" style="text-decoration:none;color:inherit"><span class="muted">미처리</span><b>${al.open.length}</b></a>
-      <a class="stat" href="#/odiary" style="text-decoration:none;color:inherit"><span class="muted">오늘 기록</span><b>${todayCnt}</b></a>
-      <a class="stat ${al.schedDue.some((s) => s.next <= today) ? 'warn' : ''}" href="#/sched" style="text-decoration:none;color:inherit"><span class="muted">정기점검 7일</span><b>${al.schedDue.length}</b></a>
-    </div>
-    <a class="btn primary block" href="#/orec/new?m=voice" style="min-height:56px;font-size:17px">🎤 점검·이상 기록 (말하면 자동 정리)</a>
-    <div class="grid2" style="margin:8px 0 12px">
-      <a class="btn" href="#/orec/new?k=민원">📝 민원 접수</a>
-      <a class="btn" href="#/orec/new?k=업체 작업">🏗 업체 작업</a>
-      <a class="btn" href="#/orec/new?m=photo">📷 사진부터</a>
-      <a class="btn" href="#/orec/new?k=일반 업무">✏️ 일반 업무</a>
-    </div>
-    ${al.schedDue.length ? `<div class="card ${al.schedDue.some((s) => s.next <= today) ? 'warnbox' : ''}"><div class="row spread"><h2 style="margin:0">🗓 정기점검 알림</h2><a class="btn small" href="#/sched">전체 ›</a></div>
-      ${al.schedDue.map((s) => `<a class="item" href="#/sched" style="padding:9px 12px"><b>${esc(fmtDate(s.next))}</b> ${s.next < today ? '<span style="color:var(--red)">(지남)</span>' : s.next === today ? '<span style="color:var(--red)">(오늘)</span>' : ''} · ${esc(s.name)} <span class="muted">${esc(s.cat)} · ${esc(s.cycle)}</span></a>`).join('')}</div>` : ''}
-    <div class="card"><div class="row spread"><h2 style="margin:0">⏳ 미처리 업무</h2><a class="btn small" href="#/orecs">전체 기록 ›</a></div>
-      <div style="margin-top:8px">${openSorted.slice(0, 15).map(recLine).join('') || '<div class="muted">미처리 업무가 없습니다.</div>'}</div></div>
-    <div class="card"><h2>도구</h2>
-      <div class="tiles">
-        <a class="tile" href="#/odiary"><i>📒</i>업무 일지</a>
-        <a class="tile" href="#/handover"><i>🤝</i>인수인계</a>
-        <a class="tile" href="#/notice"><i>📢</i>공지 도우미</a>
-        <a class="tile" href="#/sched"><i>🗓</i>정기점검</a>
-        <a class="tile" href="#/orecs?k=업체 작업"><i>🏗</i>업체 이력</a>
-        <a class="tile" href="#/orecs?k=민원"><i>📝</i>민원 현황</a>
-      </div></div>`;
 }
 
 /* ───────── 기록 목록 ───────── */
 async function viewOfficeRecs() {
   setTitle('관리사무소 기록', true);
-  const recs = (await DB.all('office')).sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
+  const recs = (await DB.all('office')).filter((r) => r.kind !== '점검실행' && r.kind !== '일지').sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
   const qs = new URLSearchParams((location.hash.split('?')[1]) || '');
   let kind = qs.get('k') || '전체', state = '미처리', q = '';
   function draw() {
     const list = recs.filter((r) => (kind === '전체' || r.kind === kind) && (state === '전체' || (state === '미처리' ? !r.done : r.done))
       && (!q || [r.text, r.loc, r.cat, r.vendor, r.unit].join(' ').toLowerCase().includes(q)));
-    $('#recList').innerHTML = list.map(recLine).join('') || '<div class="empty">해당 기록이 없습니다.</div>';
+    $('#recList').innerHTML = list.map((r) => (r.kind === '민원' ? cmpLine(r) : recLine(r))).join('') || '<div class="empty">해당 기록이 없습니다.</div>';
     document.querySelectorAll('#kChips .chip').forEach((c) => c.classList.toggle('on', c.dataset.v === kind));
     document.querySelectorAll('#sChips .chip').forEach((c) => c.classList.toggle('on', c.dataset.v === state));
     if (kind === '업체 작업') {
@@ -175,6 +141,10 @@ async function viewOfficeRec(id) {
   const qs = new URLSearchParams((location.hash.split('?')[1]) || '');
   const mode = qs.get('m');
   const rec = id ? await DB.get('office', id) : null;
+  if (rec && rec.kind === '민원') { location.replace(`#/cmp/${rec.id}`); return; }
+  if (rec && rec.kind === '업체 작업') { location.replace(`#/vwork/${rec.id}`); return; }
+  if (!rec && qs.get('k') === '민원') { location.replace('#/cmp/new'); return; }
+  if (!rec && qs.get('k') === '업체 작업') { location.replace('#/vwork/new'); return; }
   if (id && !rec) { setTitle('기록', true); view().innerHTML = '<div class="empty">기록을 찾을 수 없습니다.</div>'; return; }
   const r = rec || { kind: qs.get('k') || '점검·이상', cat: '기타', status: qs.get('k') === '민원' ? '조치 중' : '이상 발견', action: '조치 검토', done: false };
   setTitle(rec ? '관리사무소 기록' : '새 기록', true);
@@ -387,63 +357,6 @@ async function viewSched() {
   view().querySelectorAll('[data-del]').forEach((b) => {
     b.onclick = async () => { if (confirm('이 정기점검을 지울까요?')) { await DB.del('schedules', b.dataset.del); render(); } };
   });
-}
-
-/* ───────── 업무 일지(날짜별 자동 정리) ───────── */
-async function viewDiary() {
-  setTitle('업무 일지', true);
-  const qs = new URLSearchParams((location.hash.split('?')[1]) || '');
-  const day = qs.get('d') || todayStr();
-  const [recs, tasks, notes, scheds] = await Promise.all([DB.all('office'), DB.all('tasks'), DB.all('notes'), DB.all('schedules')]);
-  const on = (s) => (s || '').slice(0, 10) === day;
-  const made = recs.filter((r) => on(r.createdAt));
-  const closed = recs.filter((r) => r.done && on(r.doneAt) && !on(r.createdAt));
-  const tdone = tasks.filter((t) => t.area === '관리사무소' && t.done && (on(t.doneAt) || t.date === day));
-  const nts = notes.filter((n) => n.tag === '관리사무소' && on(n.createdAt));
-  const open = recs.filter((r) => !r.done);
-  const line = (r) => `- [${r.cat}] ${locPrefix(r)}${r.text}${r.action && r.action !== '없음' ? ` → ${r.action}` : ''}${r.done ? ' (완료)' : r.due ? ` (기한 ${r.due.slice(5)})` : ''}`;
-  const text = [
-    `[업무 일지] ${day} ${WEEKDAYS[new Date(day + 'T00:00').getDay()]}`,
-    '',
-    `■ 점검·업무 기록 ${made.length}건`, ...made.map(line),
-    ...(closed.length ? ['', `■ 처리 완료 ${closed.length}건`, ...closed.map((r) => `- ${locPrefix(r)}${r.text}${r.result ? ' / ' + r.result : ''}`)] : []),
-    ...(tdone.length ? ['', '■ 완료한 할 일', ...tdone.map((t) => `- ${t.text}`)] : []),
-    ...(nts.length ? ['', '■ 메모', ...nts.map((n) => `- ${(n.text || '').replace(/\n/g, ' ')}`)] : []),
-    '', `■ 미처리 ${open.length}건`, ...open.slice(0, 20).map(line),
-  ].join('\n');
-  view().innerHTML = `
-    <div class="row" style="margin-bottom:10px">
-      <a class="btn small" href="#/odiary?d=${addDays(-1, new Date(day + 'T00:00'))}">‹ 전날</a>
-      <input type="date" id="d_day" value="${day}" style="flex:1">
-      <a class="btn small" href="#/odiary?d=${addDays(1, new Date(day + 'T00:00'))}">다음날 ›</a>
-    </div>
-    <div class="card"><textarea id="d_text" rows="18" style="font-size:14px">${esc(text)}</textarea>
-      <div class="muted">자동으로 만든 초안입니다. 고친 뒤 복사해서 일지 양식에 붙여넣으세요.</div>
-      <button class="btn primary block" id="d_copy" type="button" style="margin-top:8px">📋 일지 복사</button></div>`;
-  $('#d_day').onchange = (e) => { location.hash = `#/odiary?d=${e.target.value}`; };
-  $('#d_copy').onclick = () => copyText($('#d_text').value);
-}
-
-/* ───────── 인수인계 ───────── */
-async function viewHandover() {
-  setTitle('인수인계', true);
-  const [recs, scheds, tasks] = await Promise.all([DB.all('office'), DB.all('schedules'), DB.all('tasks')]);
-  const open = recs.filter((r) => !r.done).sort((a, b) => (a.due || '9').localeCompare(b.due || '9'));
-  const soon = scheds.map((s) => ({ ...s, next: schedNext(s) })).filter((s) => s.next <= addDays(14)).sort((a, b) => a.next.localeCompare(b.next));
-  const t = tasks.filter((x) => x.area === '관리사무소' && !x.done);
-  const text = [
-    `[인수인계] ${todayStr()} 기준`,
-    '',
-    `■ 미처리 업무 ${open.length}건`,
-    ...open.map((r) => `- ${r.due ? `(기한 ${r.due.slice(5)}) ` : ''}[${r.cat}] ${locPrefix(r)}${r.text}${r.action && r.action !== '없음' ? ` → ${r.action}` : ''}${r.vendor ? ` / 업체 ${r.vendor}` : ''}${r.unit ? ` / ${r.unit}` : ''}`),
-    ...(t.length ? ['', '■ 남은 할 일', ...t.map((x) => `- ${x.date.slice(5)} ${x.text}`)] : []),
-    ...(soon.length ? ['', '■ 2주 안 정기점검', ...soon.map((s) => `- ${s.next.slice(5)} ${s.name} (${s.cycle}${s.vendor ? ', ' + s.vendor : ''})`)] : []),
-    '', '■ 전달 사항', '- ',
-  ].join('\n');
-  view().innerHTML = `<div class="card"><textarea id="h_text" rows="18" style="font-size:14px">${esc(text)}</textarea>
-    <div class="muted">미처리 업무·남은 할 일·정기점검을 모았습니다. '전달 사항'을 채운 뒤 복사하세요.</div>
-    <button class="btn primary block" id="h_copy" type="button" style="margin-top:8px">📋 인수인계 복사</button></div>`;
-  $('#h_copy').onclick = () => copyText($('#h_text').value);
 }
 
 /* ───────── 공지 도우미 ───────── */

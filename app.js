@@ -3,7 +3,7 @@
  */
 'use strict';
 
-const APP_VERSION = '0.9.0';
+const APP_VERSION = '0.10.0';
 const STATUSES = ['접수', '견적', '예약', '완료', '취소'];
 const METHODS = ['계좌이체', '현금', '카드', '기타'];
 const PHOTO_KINDS = ['시공 전', '시공 후', '기타'];
@@ -139,7 +139,19 @@ const routes = [
   [/^#\/orecs$/, 'home', viewOfficeRecs],
   [/^#\/orec\/new$/, 'home', () => viewOfficeRec(null)],
   [/^#\/orec\/([\w-]+)$/, 'home', (m) => viewOfficeRec(m[1])],
-  [/^#\/sched$/, 'home', viewSched],
+  [/^#\/sched$/, 'home', viewInspList],
+  // 관리실 업무수첩 (office2.js)
+  [/^#\/insp$/, 'home', viewInspList],
+  [/^#\/insp\/edit\/([\w-]+)$/, 'home', (m) => viewInspEdit(m[1])],
+  [/^#\/insp\/run\/([\w-]+)$/, 'home', (m) => viewInspRun(m[1])],
+  [/^#\/insps$/, 'home', viewInspRecs],
+  [/^#\/cmps$/, 'home', viewCmps],
+  [/^#\/cmp\/new$/, 'home', () => viewCmp(null)],
+  [/^#\/cmp\/([\w-]+)$/, 'home', (m) => viewCmp(m[1])],
+  [/^#\/vworks$/, 'home', viewVWorks],
+  [/^#\/vwork\/new$/, 'home', () => viewVWork(null)],
+  [/^#\/vwork\/([\w-]+)$/, 'home', (m) => viewVWork(m[1])],
+  [/^#\/oset$/, 'home', viewOSet],
   [/^#\/odiary$/, 'home', viewDiary],
   [/^#\/handover$/, 'home', viewHandover],
   [/^#\/notice$/, 'home', viewNotice],
@@ -222,6 +234,7 @@ function buildAlerts({ jobs, pays, tasks, cmap, today, needBackup, daysSinceBack
   if (lateTasks.length) out.push({ lv: 'warn', icon: '☑️', text: `지난 날짜의 미완료 체크리스트 ${lateTasks.length}개`, href: '#/' });
   if (oa) {
     if (oa.late.length) out.push({ lv: 'warn', icon: '🏢', text: `관리사무소 기한 지난 업무 ${oa.late.length}건`, href: '#/office' });
+    if (oa.cmpLate && oa.cmpLate.length) out.push({ lv: 'warn', icon: '📝', text: `3일 넘게 미처리된 민원 ${oa.cmpLate.length}건`, href: '#/cmps' });
     if (oa.dueToday.length) out.push({ lv: 'info', icon: '🏢', text: `관리사무소 오늘 기한 업무 ${oa.dueToday.length}건`, href: '#/office' });
     oa.schedDue.filter((s) => s.next <= today).forEach((s) => out.push({ lv: 'warn', icon: '🗓', text: `정기점검 ${s.next < today ? '지남' : '오늘'}: ${s.name}`, href: '#/sched' }));
   }
