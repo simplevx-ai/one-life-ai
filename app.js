@@ -3,7 +3,7 @@
  */
 'use strict';
 
-const APP_VERSION = '0.2.1';
+const APP_VERSION = '0.3.0';
 const STATUSES = ['접수', '견적', '예약', '완료', '취소'];
 const METHODS = ['계좌이체', '현금', '카드', '기타'];
 const PHOTO_KINDS = ['시공 전', '시공 후', '기타'];
@@ -17,15 +17,24 @@ const DB = (() => {
   let dbp = null;
   function open() {
     if (!dbp) dbp = new Promise((res, rej) => {
-      const r = indexedDB.open('onelife', 1);
+      const r = indexedDB.open('onelife', 2);
       r.onupgradeneeded = () => {
         const d = r.result;
-        d.createObjectStore('customers', { keyPath: 'id' });
-        d.createObjectStore('jobs', { keyPath: 'id' }).createIndex('customerId', 'customerId');
-        d.createObjectStore('payments', { keyPath: 'id' }).createIndex('jobId', 'jobId');
-        d.createObjectStore('photos', { keyPath: 'id' }).createIndex('jobId', 'jobId');
-        d.createObjectStore('settings', { keyPath: 'key' });
+        const has = (n) => d.objectStoreNames.contains(n);
+        // v1: 사업 관리
+        if (!has('customers')) d.createObjectStore('customers', { keyPath: 'id' });
+        if (!has('jobs')) d.createObjectStore('jobs', { keyPath: 'id' }).createIndex('customerId', 'customerId');
+        if (!has('payments')) d.createObjectStore('payments', { keyPath: 'id' }).createIndex('jobId', 'jobId');
+        if (!has('photos')) d.createObjectStore('photos', { keyPath: 'id' }).createIndex('jobId', 'jobId');
+        if (!has('settings')) d.createObjectStore('settings', { keyPath: 'key' });
+        // v2: 홈 업무 체크리스트·빠른 기록
+        if (!has('tasks')) d.createObjectStore('tasks', { keyPath: 'id' });
+        if (!has('notes')) d.createObjectStore('notes', { keyPath: 'id' });
+        // v2: 관리사무소(기록·정기점검). 사진은 photos 저장소에 jobId=기록 id로 넣는다
+        if (!has('office')) d.createObjectStore('office', { keyPath: 'id' });
+        if (!has('schedules')) d.createObjectStore('schedules', { keyPath: 'id' });
       };
+      r.onblocked = () => alert('앱이 다른 탭에서도 열려 있습니다. 다른 탭을 닫고 다시 열어 주세요.');
       r.onsuccess = () => res(r.result);
       r.onerror = () => rej(r.error);
     });
@@ -111,9 +120,21 @@ const routes = [
   [/^#\/customer\/([\w-]+)$/, 'customers', (m) => viewCustomer(m[1])],
   [/^#\/sales$/, 'sales', viewSales],
   [/^#\/settings$/, 'settings', viewSettings],
+  [/^#\/notes$/, 'home', viewNotes],
+  [/^#\/note\/new$/, 'home', () => viewNote(null, new URLSearchParams(location.hash.split('?')[1] || '').get('m'))],
+  [/^#\/note\/([\w-]+)$/, 'home', (m) => viewNote(m[1])],
+  // 관리사무소 (office.js)
+  [/^#\/office$/, 'home', viewOffice],
+  [/^#\/orecs$/, 'home', viewOfficeRecs],
+  [/^#\/orec\/new$/, 'home', () => viewOfficeRec(null)],
+  [/^#\/orec\/([\w-]+)$/, 'home', (m) => viewOfficeRec(m[1])],
+  [/^#\/sched$/, 'home', viewSched],
+  [/^#\/odiary$/, 'home', viewDiary],
+  [/^#\/handover$/, 'home', viewHandover],
+  [/^#\/notice$/, 'home', viewNotice],
 ];
 async function render() {
-  const h = location.hash || '#/';
+  const h = (location.hash || '#/').split('?')[0]; // ?뒤 값은 각 화면이 직접 읽는다
   for (const [re, tab, fn] of routes) {
     const m = h.match(re);
     if (m) {
@@ -136,66 +157,326 @@ function fab(href) {
 }
 
 /* ───────── 홈 ───────── */
+const WEEKDAYS = ['일요일', '월요일', '화요일', '수요일', '목요일', '금요일', '토요일'];
+const TASK_AREAS = ['사업', '관리사무소', '개인'];
+
+/* 홈에 보일 알림: 예약·일정·미처리 업무를 규칙으로 뽑는다 */
+function buildAlerts({ jobs, pays, tasks, cmap, today, needBackup, daysSinceBackup, oa }) {
+  const out = [];
+  const nm = (j) => nameOf(cmap[j.customerId]);
+  jobs.filter((j) => j.status === '예약' && j.scheduledAt && j.scheduledAt.slice(0, 10) === today)
+    .sort((a, b) => a.scheduledAt.localeCompare(b.scheduledAt))
+    .forEach((j) => out.push({ lv: 'info', icon: '📅', text: `오늘 ${j.scheduledAt.slice(11, 16) || ''} ${nm(j)} · ${j.type || '작업'}`, href: `#/job/${j.id}` }));
+  jobs.filter((j) => j.status === '예약' && j.scheduledAt && j.scheduledAt.slice(0, 10) < today)
+    .forEach((j) => out.push({ lv: 'warn', icon: '⏰', text: `지난 예약 완료 처리 안 함: ${fmtDate(j.scheduledAt)} ${nm(j)}`, href: `#/job/${j.id}` }));
+  const old = jobs.filter((j) => j.status === '접수' && j.createdAt && (Date.now() - new Date(j.createdAt).getTime()) / 864e5 >= 2);
+  if (old.length) out.push({ lv: 'warn', icon: '📨', text: `2일 넘게 답하지 않은 접수 ${old.length}건`, href: '#/jobs', tab: '대기' });
+  const unpaidJobs = jobs.filter((j) => j.status === '완료' && (Number(j.quote) || 0) - paidOf(j.id, pays) > 0);
+  if (unpaidJobs.length) out.push({ lv: 'warn', icon: '💸', text: `미수금 있는 완료 작업 ${unpaidJobs.length}건`, href: '#/sales' });
+  const lateTasks = tasks.filter((t) => !t.done && t.date < today);
+  if (lateTasks.length) out.push({ lv: 'warn', icon: '☑️', text: `지난 날짜의 미완료 체크리스트 ${lateTasks.length}개`, href: '#/' });
+  if (oa) {
+    if (oa.late.length) out.push({ lv: 'warn', icon: '🏢', text: `관리사무소 기한 지난 업무 ${oa.late.length}건`, href: '#/office' });
+    if (oa.dueToday.length) out.push({ lv: 'info', icon: '🏢', text: `관리사무소 오늘 기한 업무 ${oa.dueToday.length}건`, href: '#/office' });
+    oa.schedDue.filter((s) => s.next <= today).forEach((s) => out.push({ lv: 'warn', icon: '🗓', text: `정기점검 ${s.next < today ? '지남' : '오늘'}: ${s.name}`, href: '#/sched' }));
+  }
+  if (needBackup) out.push({ lv: 'warn', icon: '💾', text: daysSinceBackup === null ? '아직 백업하지 않았습니다' : `마지막 백업 ${daysSinceBackup}일 전`, href: '#/settings' });
+  return out;
+}
+
+/* AI 브리핑: 지금은 앱 안의 데이터로 만든 자동 요약(외부 AI 없음) */
+function buildBriefing({ todayJobs, waiting, overdue, monthSales, unpaid, openTasks, notesToday, oa }) {
+  const s = [];
+  s.push(todayJobs.length ? `오늘 방문·작업 ${todayJobs.length}건이 있습니다(첫 일정 ${todayJobs[0].scheduledAt.slice(11, 16) || '시간 미정'}).` : '오늘 잡힌 방문·작업은 없습니다.');
+  if (overdue) s.push(`지난 예약 ${overdue}건을 완료 처리해야 합니다.`);
+  if (waiting) s.push(`답하거나 견적 낼 문의가 ${waiting}건 남아 있습니다.`);
+  if (openTasks) s.push(`오늘 체크리스트 ${openTasks}개가 남았습니다.`);
+  if (oa && oa.open.length) s.push(`관리사무소 미처리 ${oa.open.length}건${oa.late.length ? `(기한 지남 ${oa.late.length}건)` : ''}.`);
+  if (oa) { const sd = oa.schedDue.filter((x) => x.next <= todayStr()); if (sd.length) s.push(`오늘까지 할 정기점검: ${sd.map((x) => x.name).join(', ')}.`); }
+  s.push(`이번 달 입금 ${won(monthSales)}${unpaid ? `, 미수금 ${won(unpaid)}` : ''}.`);
+  if (notesToday) s.push(`오늘 빠른 기록 ${notesToday}건.`);
+  return s;
+}
+
 async function viewHome() {
   setTitle('ONE LIFE AI');
-  const [jobs, pays, custs, lastBackup, sheetCfg, lastSync] = await Promise.all([DB.all('jobs'), DB.all('payments'), DB.all('customers'), getSetting('lastBackup', null), getSetting('sheet', {}), getSetting('lastSync', null)]);
+  const [jobs, pays, custs, tasks, notes, offRecs, scheds, lastBackup, sheetCfg, lastSync] = await Promise.all([
+    DB.all('jobs'), DB.all('payments'), DB.all('customers'), DB.all('tasks'), DB.all('notes'), DB.all('office'), DB.all('schedules'),
+    getSetting('lastBackup', null), getSetting('sheet', {}), getSetting('lastSync', null)]);
+  const oa = officeAlerts(offRecs, scheds);
   const sheetOn = !!(sheetCfg && sheetCfg.url && sheetCfg.key);
   const cmap = Object.fromEntries(custs.map((c) => [c.id, c]));
+  const now = new Date();
   const today = todayStr();
   const week = new Date(); week.setDate(week.getDate() + 7);
   const weekStr = `${week.getFullYear()}-${pad(week.getMonth() + 1)}-${pad(week.getDate())}`;
-  const upcoming = jobs.filter((j) => j.status === '예약' && j.scheduledAt && j.scheduledAt.slice(0, 10) >= today && j.scheduledAt.slice(0, 10) <= weekStr)
-    .sort((a, b) => a.scheduledAt.localeCompare(b.scheduledAt));
-  const overdue = jobs.filter((j) => j.status === '예약' && j.scheduledAt && j.scheduledAt.slice(0, 10) < today);
+  const sched = jobs.filter((j) => j.status === '예약' && j.scheduledAt).sort((a, b) => a.scheduledAt.localeCompare(b.scheduledAt));
+  const todayJobs = sched.filter((j) => j.scheduledAt.slice(0, 10) === today);
+  const nextJobs = sched.filter((j) => j.scheduledAt.slice(0, 10) > today && j.scheduledAt.slice(0, 10) <= weekStr);
+  const overdue = sched.filter((j) => j.scheduledAt.slice(0, 10) < today).length;
   const waiting = jobs.filter((j) => j.status === '접수' || j.status === '견적').length;
   const month = monthStr();
   const monthSales = pays.filter((p) => (p.date || '').startsWith(month)).reduce((a, p) => a + (Number(p.amount) || 0), 0);
   const unpaid = jobs.filter((j) => j.status === '완료').reduce((a, j) => a + Math.max(0, (Number(j.quote) || 0) - paidOf(j.id, pays)), 0);
   const daysSinceBackup = lastBackup ? Math.floor((Date.now() - lastBackup) / 864e5) : null;
-  const needBackup = jobs.length > 0 && (daysSinceBackup === null || daysSinceBackup >= 7);
+  const needBackup = (jobs.length + notes.length + offRecs.length) > 0 && (daysSinceBackup === null || daysSinceBackup >= 7);
+  // 체크리스트: 오늘 것 + 지난 날짜에 못 끝낸 것
+  const dayTasks = tasks.filter((t) => t.date === today || (!t.done && t.date < today))
+    .sort((a, b) => (a.done - b.done) || (a.date || '').localeCompare(b.date || '') || (a.createdAt || '').localeCompare(b.createdAt || ''));
+  const openTasks = dayTasks.filter((t) => !t.done).length;
+  const notesToday = notes.filter((n) => (n.createdAt || '').slice(0, 10) === today).length;
+  const alerts = buildAlerts({ jobs, pays, tasks, cmap, today, needBackup, daysSinceBackup, oa });
+  const brief = buildBriefing({ todayJobs, waiting, overdue, monthSales, unpaid, openTasks, notesToday, oa });
 
-  const line = (j) => {
+  const jobLine = (j, showDate) => {
     const c = cmap[j.customerId] || {};
-    return `<a class="item" href="#/job/${j.id}"><div class="row spread"><span class="t">${esc(fmtDate(j.scheduledAt))} · ${esc(nameOf(c))}</span><span class="badge s-${j.status}">${j.status}</span></div>
+    const when = showDate ? fmtDate(j.scheduledAt) : (j.scheduledAt.slice(11, 16) || '시간 미정');
+    return `<a class="item" href="#/job/${j.id}"><div class="row spread"><span class="t">${esc(when)} · ${esc(nameOf(c))}</span><span class="badge s-${j.status}">${j.status}</span></div>
       <div class="muted">${esc([j.area || c.area, j.type, j.product].filter(Boolean).join(' · '))}</div></a>`;
   };
 
   view().innerHTML = `
     <div class="card hero">
-      <div class="muted">${esc(fmtDate(today))} 오늘</div>
-      <div style="font-size:20px;font-weight:800;margin-top:2px">개인사업 현황</div>
-      <div class="grid2" style="margin-top:10px">
-        <div><div class="muted">이번 달 매출(입금)</div><b style="font-size:22px">${won(monthSales)}</b></div>
+      <div style="font-size:15px;color:#C9D6F5">${now.getFullYear()}년</div>
+      <div style="font-size:26px;font-weight:800;line-height:1.2">${now.getMonth() + 1}월 ${now.getDate()}일 <span style="color:var(--gold)">${WEEKDAYS[now.getDay()]}</span></div>
+    </div>
+
+    <div class="card">
+      <div class="row spread"><h2 style="margin:0">🤖 AI 브리핑</h2><span class="muted">자동 요약</span></div>
+      <ul style="margin:8px 0 0;padding-left:18px">${brief.map((s) => `<li>${esc(s)}</li>`).join('')}</ul>
+    </div>
+
+    ${alerts.length ? `<div class="card ${alerts.some((a) => a.lv === 'warn') ? 'warnbox' : ''}">
+      <h2>🔔 알림 <span class="muted">${alerts.length}</span></h2>
+      ${alerts.map((a, i) => `<a class="item" href="${a.href}" data-alert="${i}" style="padding:9px 12px"><span>${a.icon}</span> ${esc(a.text)}</a>`).join('')}
+    </div>` : ''}
+
+    <div class="card">
+      <div class="row spread"><h2 style="margin:0">📅 작업 일정</h2><a class="btn small" href="#/job/new">+ 새 작업</a></div>
+      <div class="muted" style="margin:8px 0 4px">오늘</div>
+      ${todayJobs.length ? todayJobs.map((j) => jobLine(j, false)).join('') : '<div class="muted">오늘 일정 없음</div>'}
+      <div class="muted" style="margin:10px 0 4px">앞으로 7일</div>
+      ${nextJobs.length ? nextJobs.map((j) => jobLine(j, true)).join('') : '<div class="muted">예정 없음</div>'}
+    </div>
+
+    <a class="card hero" href="#/sales" style="display:block;text-decoration:none">
+      <div class="row spread"><b>💰 ${now.getMonth() + 1}월 매출</b><span class="muted">처리 대기 ${waiting}건 ›</span></div>
+      <div class="grid2" style="margin-top:8px">
+        <div><div class="muted">입금</div><b style="font-size:22px">${won(monthSales)}</b></div>
         <div><div class="muted">미수금</div><b style="font-size:22px;color:${unpaid ? '#FFD1D1' : '#fff'}">${won(unpaid)}</b></div>
       </div>
-    </div>
-    ${needBackup ? `<div class="card warnbox"><b>백업이 필요합니다</b><div class="muted">${daysSinceBackup === null ? '아직 한 번도 백업하지 않았습니다.' : `마지막 백업 ${daysSinceBackup}일 전.`} 폰 데이터가 지워지면 복구할 수 없습니다.</div><a class="btn small" style="margin-top:8px" href="#/settings">백업하러 가기</a></div>` : ''}
-    <div class="grid2" style="margin-bottom:12px">
-      <a class="stat" href="#/jobs" onclick="sessionStorage.setItem('jobsTab','대기')" style="text-decoration:none;color:inherit"><span class="muted">처리 대기(접수·견적)</span><b>${waiting}건</b></a>
-      <a class="stat ${overdue.length ? 'warn' : ''}" href="#/jobs" onclick="sessionStorage.setItem('jobsTab','예약')" style="text-decoration:none;color:inherit"><span class="muted">지난 예약(완료 처리 안 함)</span><b>${overdue.length}건</b></a>
-    </div>
+    </a>
+
     <div class="card">
-      <h2>앞으로 7일 예약</h2>
-      ${upcoming.length ? upcoming.map(line).join('') : '<div class="muted">예약된 작업이 없습니다.</div>'}
+      <div class="row spread"><h2 style="margin:0">☑️ 업무 체크리스트</h2><span class="muted">${dayTasks.length - openTasks}/${dayTasks.length} 완료</span></div>
+      <ul class="list" id="taskList" style="margin-top:8px">${dayTasks.map((t) => `
+        <li class="row" style="padding:6px 0;border-bottom:1px solid var(--line)">
+          <input type="checkbox" data-done="${t.id}" ${t.done ? 'checked' : ''} style="width:24px;min-height:24px;flex:none" aria-label="완료">
+          <span style="flex:1;${t.done ? 'text-decoration:line-through;color:var(--muted)' : ''}">${esc(t.text)}
+            <span class="badge">${esc(t.area || '개인')}</span>${t.date < today ? ` <span class="badge" style="color:var(--red)">${esc(fmtDate(t.date))}</span>` : ''}</span>
+          <button class="btn small" data-deltask="${t.id}" type="button" aria-label="삭제">✕</button>
+        </li>`).join('') || '<li class="muted">오늘 할 일을 추가하세요.</li>'}</ul>
+      <form id="taskForm" class="row" style="margin-top:8px">
+        <select id="taskArea" style="width:auto;flex:none">${opts(TASK_AREAS, sessionStorage.getItem('taskArea') || '사업')}</select>
+        <input id="taskText" placeholder="할 일 입력" autocomplete="off">
+        <button class="btn primary" type="submit" style="flex:none">추가</button>
+      </form>
     </div>
-    <div class="row" style="margin-bottom:12px">
-      <a class="btn primary block" href="#/job/new" style="flex:2">+ 새 문의·작업</a>
-      ${sheetOn ? '<button class="btn" id="homeSync" type="button" style="flex:1">🔄 시트</button>' : ''}
+
+    <div class="card">
+      <div class="row spread"><h2 style="margin:0">✍️ 빠른 기록</h2><a class="btn small" href="#/notes">전체 ${notes.length} ›</a></div>
+      <div class="grid2" style="grid-template-columns:repeat(3,1fr);margin-top:8px">
+        <a class="btn" href="#/note/new?m=voice">🎤 음성</a>
+        <a class="btn" href="#/note/new?m=text">📝 텍스트</a>
+        <a class="btn" href="#/note/new?m=photo">📷 사진</a>
+      </div>
     </div>
-    ${sheetOn ? `<div class="muted" style="margin:-6px 0 12px;text-align:right">시트 동기화: ${lastSync ? esc(new Date(lastSync).toLocaleString('ko-KR')) : '아직 안 함'}</div>` : ''}
+
+    ${sheetOn ? `<div class="row" style="margin-bottom:6px"><button class="btn block" id="homeSync" type="button">🔄 구글 시트 동기화</button></div>
+      <div class="muted" style="margin-bottom:12px;text-align:right">마지막 동기화: ${lastSync ? esc(new Date(lastSync).toLocaleString('ko-KR')) : '아직 안 함'}</div>` : ''}
+
     <div class="card">
       <h2>ONE LIFE 모듈</h2>
       <div class="tiles">
         <a class="tile" href="#/jobs"><i>🛠</i>사업 관리</a>
-        <span class="tile off"><i>🏢</i>관리사무소<br><small>준비 중</small></span>
-        <span class="tile off"><i>🤖</i>AI 비서<br><small>준비 중</small></span>
+        <a class="tile" href="#/office"><i>🏢</i>관리사무소${oa.open.length ? `<br><small style="color:var(--red)">미처리 ${oa.open.length}</small>` : ''}</a>
+        <a class="tile" href="#/notes"><i>🤖</i>AI 비서<br><small>빠른 기록</small></a>
         <span class="tile off"><i>📈</i>투자 분석<br><small>준비 중</small></span>
         <span class="tile off"><i>🏃</i>마라톤<br><small>준비 중</small></span>
         <span class="tile off"><i>🤿</i>프리다이빙<br><small>준비 중</small></span>
       </div>
     </div>
     <div class="muted" style="text-align:center">v${APP_VERSION} · 데이터는 이 폰에 저장${sheetOn ? ' · 구글 시트 동기화 켜짐' : ''}</div>`;
+
   if (sheetOn) $('#homeSync').onclick = (e) => runSync(e.target);
+  view().querySelectorAll('[data-alert]').forEach((a) => {
+    const al = alerts[+a.dataset.alert];
+    if (al.tab) a.addEventListener('click', () => sessionStorage.setItem('jobsTab', al.tab));
+  });
+  $('#taskForm').onsubmit = async (e) => {
+    e.preventDefault();
+    const text = $('#taskText').value.trim();
+    if (!text) return;
+    const area = $('#taskArea').value;
+    sessionStorage.setItem('taskArea', area);
+    await DB.put('tasks', { id: uid(), text, area, date: today, done: false, createdAt: new Date().toISOString() });
+    render();
+  };
+  $('#taskList').onclick = async (e) => {
+    const d = e.target.closest('[data-deltask]');
+    if (d) { await DB.del('tasks', d.dataset.deltask); render(); }
+  };
+  $('#taskList').onchange = async (e) => {
+    const id = e.target.dataset.done;
+    if (!id) return;
+    const t = await DB.get('tasks', id);
+    // 지난 날짜 일을 오늘 끝내면 오늘 기록으로 옮긴다
+    await DB.put('tasks', { ...t, done: e.target.checked, doneAt: e.target.checked ? new Date().toISOString() : '', date: e.target.checked ? today : t.date });
+    render();
+  };
+}
+
+/* ───────── 빠른 기록(음성·텍스트·사진) ───────── */
+const NOTE_TAGS = ['사업', '관리사무소', '개인', '아이디어'];
+
+async function viewNotes() {
+  setTitle('빠른 기록', true);
+  const notes = (await DB.all('notes')).sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
+  let tag = sessionStorage.getItem('noteTag') || '전체';
+  let q = '';
+  const urls = [];
+  function draw() {
+    urls.splice(0).forEach((u) => URL.revokeObjectURL(u));
+    const list = notes.filter((n) => (tag === '전체' || n.tag === tag) && (!q || (n.text || '').toLowerCase().includes(q)));
+    $('#noteList').innerHTML = list.length ? list.map((n) => {
+      let img = '';
+      if (n.photo) { const u = URL.createObjectURL(n.photo); urls.push(u); img = `<img src="${u}" alt="" style="width:64px;height:64px;object-fit:cover;border-radius:8px;flex:none">`; }
+      return `<a class="item row" href="#/note/${n.id}" style="align-items:flex-start">${img}<div style="flex:1;min-width:0">
+        <div class="muted">${esc(fmtDate((n.createdAt || '').slice(0, 10)))} ${esc((n.createdAt || '').slice(11, 16))} · ${esc(n.tag || '')} ${n.via === 'voice' ? '🎤' : ''}${n.done ? ' · ✅ 처리함' : ''}</div>
+        <div style="white-space:pre-wrap;overflow:hidden;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical">${esc(n.text || '(사진만)')}</div></div></a>`;
+    }).join('') : '<div class="empty">기록이 없습니다.</div>';
+    document.querySelectorAll('#noteTags .chip').forEach((c) => c.classList.toggle('on', c.dataset.t === tag));
+  }
+  view().innerHTML = `
+    <div class="grid2" style="grid-template-columns:repeat(3,1fr);margin-bottom:10px">
+      <a class="btn" href="#/note/new?m=voice">🎤 음성</a><a class="btn" href="#/note/new?m=text">📝 텍스트</a><a class="btn" href="#/note/new?m=photo">📷 사진</a>
+    </div>
+    <input id="q" type="search" placeholder="기록 검색" style="margin-bottom:10px">
+    <div class="chips" id="noteTags">${['전체', ...NOTE_TAGS].map((t) => `<button class="chip" data-t="${t}">${t}</button>`).join('')}</div>
+    <div id="noteList"></div>`;
+  $('#noteTags').onclick = (e) => { const b = e.target.closest('.chip'); if (!b) return; tag = b.dataset.t; sessionStorage.setItem('noteTag', tag); draw(); };
+  $('#q').oninput = (e) => { q = e.target.value.trim().toLowerCase(); draw(); };
+  draw();
+}
+
+async function viewNote(id, mode) {
+  const note = id ? await DB.get('notes', id) : null;
+  if (id && !note) { setTitle('기록', true); view().innerHTML = '<div class="empty">기록을 찾을 수 없습니다.</div>'; return; }
+  const n = note || { tag: sessionStorage.getItem('noteTag') && sessionStorage.getItem('noteTag') !== '전체' ? sessionStorage.getItem('noteTag') : '사업' };
+  setTitle(note ? '기록' : '새 기록', true);
+  let photo = n.photo || null;
+  let via = n.via || (mode === 'voice' ? 'voice' : 'text');
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+
+  view().innerHTML = `
+    <div class="card">
+      <label for="n_tag">분류</label>
+      <select id="n_tag">${opts(NOTE_TAGS, n.tag)}</select>
+      <label for="n_text">내용</label>
+      <textarea id="n_text" rows="6" placeholder="말하거나 적으세요">${esc(n.text)}</textarea>
+      <div class="row wrap" style="margin-top:8px">
+        <button class="btn" id="micBtn" type="button">🎤 말로 입력</button>
+        <label class="btn" style="margin:0;color:var(--ink)">📷 사진<input id="n_cam" type="file" accept="image/*" capture="environment" hidden></label>
+        <label class="btn" style="margin:0;color:var(--ink)">🖼 앨범<input id="n_alb" type="file" accept="image/*" hidden></label>
+      </div>
+      <div id="micState" class="muted" style="margin-top:6px"></div>
+      <div id="n_photo" style="margin-top:10px"></div>
+      ${note ? `<label class="row" style="margin-top:10px;color:var(--ink);font-size:15px"><input type="checkbox" id="n_done" ${note.done ? 'checked' : ''} style="width:22px;min-height:22px;flex:none"> 처리함</label>` : ''}
+    </div>
+    <button class="btn primary block" id="n_save" type="button">💾 저장</button>
+    ${note ? `<div class="row" style="margin-top:8px">
+      <button class="btn block" id="n_toTask" type="button">☑️ 오늘 할 일로</button>
+      <button class="btn block" id="n_toJob" type="button">🛠 새 작업으로</button></div>
+      <button class="btn block" id="n_copy" type="button" style="margin-top:8px">📋 내용 복사</button>
+      <button class="btn danger block" id="n_del" type="button" style="margin-top:8px">기록 삭제</button>` : ''}`;
+
+  let url = '';
+  function drawPhoto() {
+    if (url) URL.revokeObjectURL(url);
+    url = photo ? URL.createObjectURL(photo) : '';
+    $('#n_photo').innerHTML = photo ? `<div class="photo" style="width:140px"><img src="${url}" alt="기록 사진"></div><button class="btn small danger" id="n_rmPhoto" type="button" style="margin-top:6px">사진 빼기</button>` : '';
+    if (photo) $('#n_rmPhoto').onclick = () => { photo = null; drawPhoto(); };
+  }
+  drawPhoto();
+  const takePhoto = async (e) => {
+    const f = e.target.files[0]; e.target.value = '';
+    if (!f) return;
+    try { photo = await shrink(f, 1600, 0.82); drawPhoto(); } catch (err) { toast(err.message); }
+  };
+  $('#n_cam').onchange = takePhoto;
+  $('#n_alb').onchange = takePhoto;
+
+  // 음성 받아쓰기(크롬 기본 기능, 인터넷 필요). 지원 안 되면 키보드의 마이크 버튼 안내
+  let rec = null;
+  $('#micBtn').onclick = () => {
+    if (!SR) { toast('이 브라우저는 음성 입력을 지원하지 않습니다. 키보드의 🎤 버튼을 쓰세요'); $('#n_text').focus(); return; }
+    if (rec) { rec.stop(); return; }
+    rec = new SR();
+    rec.lang = 'ko-KR'; rec.interimResults = true; rec.continuous = true;
+    const base = $('#n_text').value;
+    let finalText = '';
+    rec.onresult = (ev) => {
+      let interim = '';
+      for (let i = ev.resultIndex; i < ev.results.length; i++) {
+        const t = ev.results[i][0].transcript;
+        if (ev.results[i].isFinal) finalText += t + ' '; else interim += t;
+      }
+      $('#n_text').value = (base ? base + '\n' : '') + finalText + interim;
+    };
+    rec.onstart = () => { $('#micBtn').textContent = '⏹ 그만 듣기'; $('#micState').textContent = '듣는 중… 말씀하세요'; via = 'voice'; };
+    rec.onerror = (ev) => { $('#micState').textContent = ev.error === 'not-allowed' ? '마이크 권한을 허용해 주세요' : '음성 인식 오류: ' + ev.error; };
+    rec.onend = () => { rec = null; $('#micBtn').textContent = '🎤 말로 입력'; if ($('#micState').textContent.startsWith('듣는 중')) $('#micState').textContent = ''; };
+    try { rec.start(); } catch (err) { toast('음성 입력을 시작할 수 없습니다'); rec = null; }
+  };
+
+  const save = async () => {
+    if (rec) rec.stop();
+    const text = $('#n_text').value.trim();
+    if (!text && !photo) { toast('내용이나 사진을 넣어 주세요'); return null; }
+    const data = { ...(note || { id: uid(), createdAt: new Date().toISOString() }), tag: $('#n_tag').value, text, photo, via, done: note ? $('#n_done').checked : false, updatedAt: new Date().toISOString() };
+    await DB.put('notes', data);
+    return data;
+  };
+  $('#n_save').onclick = async () => { if (await save()) { toast('저장했습니다'); history.length > 1 ? history.back() : (location.hash = '#/notes'); } };
+
+  if (mode === 'voice' && !note) setTimeout(() => $('#micBtn').click(), 300);
+  if (mode === 'photo' && !note) setTimeout(() => $('#n_cam').click(), 300);
+  if (mode === 'text' && !note) $('#n_text').focus();
+  if (!note) return;
+
+  $('#n_toTask').onclick = async () => {
+    const d = await save(); if (!d) return;
+    await DB.put('tasks', { id: uid(), text: (d.text || '사진 기록 확인').split('\n')[0].slice(0, 80), area: TASK_AREAS.includes(d.tag) ? d.tag : '개인', date: todayStr(), done: false, createdAt: new Date().toISOString(), noteId: d.id });
+    toast('오늘 체크리스트에 추가했습니다');
+  };
+  $('#n_toJob').onclick = async () => {
+    const d = await save(); if (!d) return;
+    const now = new Date().toISOString();
+    const c = { id: uid(), name: '', phone: (d.text.match(/01[016789][-\s]?\d{3,4}[-\s]?\d{4}/) || [''])[0].replace(/\D/g, ''), createdAt: now, updatedAt: now };
+    await DB.put('customers', c);
+    const j = { id: uid(), customerId: c.id, status: '접수', summary: d.text, createdAt: now, updatedAt: now };
+    await DB.put('jobs', j);
+    if (d.photo) await DB.put('photos', { id: uid(), jobId: j.id, kind: '기타', blob: d.photo, createdAt: now });
+    await DB.put('notes', { ...d, done: true });
+    toast('새 작업을 만들었습니다');
+    location.hash = `#/job/${j.id}`;
+  };
+  $('#n_copy').onclick = async () => {
+    try { await navigator.clipboard.writeText($('#n_text').value); toast('복사했습니다'); } catch { toast('복사하지 못했습니다'); }
+  };
+  $('#n_del').onclick = async () => {
+    if (confirm('이 기록을 지울까요?')) { await DB.del('notes', note.id); location.replace('#/notes'); }
+  };
 }
 
 /* ───────── 작업 목록 ───────── */
@@ -800,12 +1081,15 @@ async function viewSettings() {
 const blobToDataURL = (b) => new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(r.result); r.onerror = () => rej(r.error); r.readAsDataURL(b); });
 async function dataURLToBlob(u) { return (await fetch(u)).blob(); }
 
+const BACKUP_STORES = ['customers', 'jobs', 'payments', 'photos', 'settings', 'tasks', 'notes', 'office', 'schedules'];
 async function exportBackup() {
   toast('백업 파일 만드는 중…');
-  const [customers, jobs, payments, photos, settings] = await Promise.all(['customers', 'jobs', 'payments', 'photos', 'settings'].map((s) => DB.all(s)));
+  const [customers, jobs, payments, photos, settings, tasks, notes, office, schedules] = await Promise.all(BACKUP_STORES.map((s) => DB.all(s)));
   const ph = [];
   for (const p of photos) ph.push({ ...p, blob: undefined, data: await blobToDataURL(p.blob) });
-  const out = { app: 'ONE LIFE AI', version: APP_VERSION, exportedAt: new Date().toISOString(), customers, jobs, payments, settings: settings.filter((s) => s.key !== 'lastBackup'), photos: ph };
+  const nt = [];
+  for (const n of notes) nt.push({ ...n, photo: undefined, photoData: n.photo ? await blobToDataURL(n.photo) : '' });
+  const out = { app: 'ONE LIFE AI', version: APP_VERSION, exportedAt: new Date().toISOString(), customers, jobs, payments, settings: settings.filter((s) => s.key !== 'lastBackup'), photos: ph, tasks, notes: nt, office, schedules };
   const blob = new Blob([JSON.stringify(out)], { type: 'application/json' });
   const name = `onelife-backup-${todayStr()}.json`;
   const file = new File([blob], name, { type: 'application/json' });
@@ -828,12 +1112,18 @@ async function importBackup(text) {
   if (d.app !== 'ONE LIFE AI' || !Array.isArray(d.jobs)) throw new Error('ONE LIFE AI 백업 파일이 아닙니다');
   const photos = [];
   for (const p of d.photos || []) { const { data, ...rest } = p; photos.push({ ...rest, blob: await dataURLToBlob(data) }); }
-  for (const s of ['customers', 'jobs', 'payments', 'photos', 'settings']) await DB.clear(s);
+  const notes = [];
+  for (const n of d.notes || []) { const { photoData, ...rest } = n; notes.push({ ...rest, photo: photoData ? await dataURLToBlob(photoData) : null }); }
+  for (const s of BACKUP_STORES) await DB.clear(s);
   for (const x of d.customers || []) await DB.put('customers', x);
   for (const x of d.jobs) await DB.put('jobs', x);
   for (const x of d.payments || []) await DB.put('payments', x);
   for (const x of photos) await DB.put('photos', x);
   for (const x of d.settings || []) await DB.put('settings', x);
+  for (const x of d.tasks || []) await DB.put('tasks', x);
+  for (const x of notes) await DB.put('notes', x);
+  for (const x of d.office || []) await DB.put('office', x);
+  for (const x of d.schedules || []) await DB.put('schedules', x);
   await setSetting('lastBackup', Date.now());
 }
 
