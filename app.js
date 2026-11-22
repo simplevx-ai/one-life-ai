@@ -3,7 +3,7 @@
  */
 'use strict';
 
-const APP_VERSION = '0.5.0';
+const APP_VERSION = '0.6.0';
 const STATUSES = ['접수', '견적', '예약', '완료', '취소'];
 const METHODS = ['계좌이체', '현금', '카드', '기타'];
 const PHOTO_KINDS = ['시공 전', '시공 후', '기타'];
@@ -135,17 +135,10 @@ const routes = [
   [/^#\/handover$/, 'home', viewHandover],
   [/^#\/notice$/, 'home', viewNotice],
   [/^#\/ai$/, 'home', viewAI], // ai.js
-  // 투자 분석 (invest.js)
-  [/^#\/invest$/, 'home', viewInvest],
-  [/^#\/inv\/new$/, 'home', () => viewInvEdit(null)],
-  [/^#\/inv\/edit\/([\w-]+)$/, 'home', (m) => viewInvEdit(m[1])],
-  [/^#\/inv\/([\w-]+)$/, 'home', (m) => viewInvDetail(m[1])],
-  [/^#\/scens$/, 'home', viewScens],
-  [/^#\/scen\/new$/, 'home', () => viewScen(null)],
-  [/^#\/scen\/([\w-]+)$/, 'home', (m) => viewScen(m[1])],
-  [/^#\/ijournal$/, 'home', viewJournal],
-  [/^#\/ij\/new$/, 'home', () => viewJEdit(null)],
-  [/^#\/ij\/([\w-]+)$/, 'home', (m) => viewJEdit(m[1])],
+  // 현장 보고서 (report.js)
+  [/^#\/reports$/, 'home', viewReports],
+  [/^#\/report\/new$/, 'home', viewReportNew],
+  [/^#\/report\/([\w-]+)$/, 'home', (m) => viewReport(m[1])],
 ];
 async function render() {
   const h = (location.hash || '#/').split('?')[0]; // ?뒤 값은 각 화면이 직접 읽는다
@@ -315,7 +308,7 @@ async function viewHome() {
         <a class="tile" href="#/jobs"><i>🛠</i>사업 관리</a>
         <a class="tile" href="#/office"><i>🏢</i>관리사무소${oa.open.length ? `<br><small style="color:var(--red)">미처리 ${oa.open.length}</small>` : ''}</a>
         <a class="tile" href="#/ai"><i>🤖</i>AI 비서</a>
-        <a class="tile" href="#/invest"><i>📈</i>투자 분석</a>
+        <a class="tile" href="#/reports"><i>📸</i>현장 보고서</a>
         <span class="tile off"><i>🏃</i>마라톤<br><small>준비 중</small></span>
         <span class="tile off"><i>🤿</i>프리다이빙<br><small>준비 중</small></span>
       </div>
@@ -629,7 +622,8 @@ async function viewJob(id) {
       <button class="btn block" id="addPay" type="button" style="margin-top:10px">+ 입금 기록</button>
     </div>
     <div class="card">
-      <h2>블로그·공유</h2>
+      <h2>보고서·블로그</h2>
+      <a class="btn primary block" href="#/report/${job.id}" style="margin-bottom:8px">📄 현장 보고서 (사진으로 고객용 보고서)</a>
       <button class="btn block" id="copyBlog" type="button">📋 블로그 자료 복사</button>
       <div class="muted" style="margin-top:6px">지역·작업·제품·문제·해결·키워드를 정리해 복사합니다. Claude나 블로그 글쓰기에 붙여넣으세요.</div>
     </div>
