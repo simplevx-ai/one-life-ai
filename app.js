@@ -3,7 +3,7 @@
  */
 'use strict';
 
-const APP_VERSION = '0.7.0';
+const APP_VERSION = '0.8.0';
 const STATUSES = ['접수', '견적', '예약', '완료', '취소'];
 const METHODS = ['계좌이체', '현금', '카드', '기타'];
 const PHOTO_KINDS = ['시공 전', '시공 후', '기타'];
@@ -17,7 +17,7 @@ const DB = (() => {
   let dbp = null;
   function open() {
     if (!dbp) dbp = new Promise((res, rej) => {
-      const r = indexedDB.open('onelife', 3);
+      const r = indexedDB.open('onelife', 4);
       r.onupgradeneeded = () => {
         const d = r.result;
         const has = (n) => d.objectStoreNames.contains(n);
@@ -35,6 +35,8 @@ const DB = (() => {
         if (!has('schedules')) d.createObjectStore('schedules', { keyPath: 'id' });
         // v3: 투자 분석(관심종목 watch·시나리오 scenario·기록 journal을 type으로 구분)
         if (!has('invest')) d.createObjectStore('invest', { keyPath: 'id' });
+        // v4: 마케팅 콘텐츠(채널별 초안·발행 기록)
+        if (!has('mkt')) d.createObjectStore('mkt', { keyPath: 'id' });
       };
       r.onblocked = () => alert('앱이 다른 탭에서도 열려 있습니다. 다른 탭을 닫고 다시 열어 주세요.');
       r.onsuccess = () => res(r.result);
@@ -144,6 +146,11 @@ const routes = [
   [/^#\/voice$/, 'home', viewVoiceList],
   [/^#\/voice\/new$/, 'home', viewVoiceNew],
   [/^#\/voice\/([\w-]+)$/, 'home', (m) => viewVoice(m[1])],
+  // 마케팅 (mkt.js)
+  [/^#\/mkt$/, 'home', viewMkt],
+  [/^#\/mktnew$/, 'home', viewMktNew],
+  [/^#\/mktset$/, 'home', viewMktSet],
+  [/^#\/mkt\/([\w-]+)$/, 'home', (m) => viewMktItem(m[1])],
   // 현장 보고서 (report.js)
   [/^#\/reports$/, 'home', viewReports],
   [/^#\/report\/new$/, 'home', viewReportNew],
@@ -318,7 +325,7 @@ async function viewHome() {
         <a class="tile" href="#/office"><i>🏢</i>관리사무소${oa.open.length ? `<br><small style="color:var(--red)">미처리 ${oa.open.length}</small>` : ''}</a>
         <a class="tile" href="#/ai"><i>🤖</i>AI 비서</a>
         <a class="tile" href="#/reports"><i>📸</i>현장 보고서</a>
-        <span class="tile off"><i>🏃</i>마라톤<br><small>준비 중</small></span>
+        <a class="tile" href="#/mkt"><i>📣</i>마케팅</a>
         <span class="tile off"><i>🤿</i>프리다이빙<br><small>준비 중</small></span>
       </div>
     </div>
@@ -1103,15 +1110,15 @@ async function viewSettings() {
 const blobToDataURL = (b) => new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(r.result); r.onerror = () => rej(r.error); r.readAsDataURL(b); });
 async function dataURLToBlob(u) { return (await fetch(u)).blob(); }
 
-const BACKUP_STORES = ['customers', 'jobs', 'payments', 'photos', 'settings', 'tasks', 'notes', 'office', 'schedules', 'invest'];
+const BACKUP_STORES = ['customers', 'jobs', 'payments', 'photos', 'settings', 'tasks', 'notes', 'office', 'schedules', 'invest', 'mkt'];
 async function exportBackup() {
   toast('백업 파일 만드는 중…');
-  const [customers, jobs, payments, photos, settings, tasks, notes, office, schedules, invest] = await Promise.all(BACKUP_STORES.map((s) => DB.all(s)));
+  const [customers, jobs, payments, photos, settings, tasks, notes, office, schedules, invest, mkt] = await Promise.all(BACKUP_STORES.map((s) => DB.all(s)));
   const ph = [];
   for (const p of photos) ph.push({ ...p, blob: undefined, data: await blobToDataURL(p.blob) });
   const nt = [];
   for (const n of notes) nt.push({ ...n, photo: undefined, photoData: n.photo ? await blobToDataURL(n.photo) : '', audio: undefined, audioData: n.audio ? await blobToDataURL(n.audio) : '' });
-  const out = { app: 'ONE LIFE AI', version: APP_VERSION, exportedAt: nowISO(), customers, jobs, payments, settings: settings.filter((s) => s.key !== 'lastBackup'), photos: ph, tasks, notes: nt, office, schedules, invest };
+  const out = { app: 'ONE LIFE AI', version: APP_VERSION, exportedAt: nowISO(), customers, jobs, payments, settings: settings.filter((s) => s.key !== 'lastBackup'), photos: ph, tasks, notes: nt, office, schedules, invest, mkt };
   const blob = new Blob([JSON.stringify(out)], { type: 'application/json' });
   const name = `onelife-backup-${todayStr()}.json`;
   const file = new File([blob], name, { type: 'application/json' });
@@ -1147,6 +1154,7 @@ async function importBackup(text) {
   for (const x of d.office || []) await DB.put('office', x);
   for (const x of d.schedules || []) await DB.put('schedules', x);
   for (const x of d.invest || []) await DB.put('invest', x);
+  for (const x of d.mkt || []) await DB.put('mkt', x);
   await setSetting('lastBackup', Date.now());
 }
 
