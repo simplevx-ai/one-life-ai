@@ -278,7 +278,10 @@ async function viewEstimate(id) {
   const saveEst = async () => { const jj = await DB.get('jobs', id); const T = estTotal(e); await DB.put('jobs', { ...jj, est: e, quote: T.total, status: jj.status === '접수' ? '견적' : jj.status, updatedAt: nowISO() }); };
   const shareDoc = async (kind) => {
     const T = estTotal(e);
-    const blob = await renderEstImage(kind, e, T, j, c || {}, biz, paid);
+    // 영수증은 실제 간이영수증 양식(rcptform.js), 견적서는 기존 디자인
+    const blob = kind === '영수증'
+      ? await renderFormReceipt(e, T, j, c || {}, biz, paid, ([...pays].sort((a, b) => (b.date || '').localeCompare(a.date || ''))[0] || {}).method || '')
+      : await renderEstImage(kind, e, T, j, c || {}, biz, paid);
     const u = URL.createObjectURL(blob);
     const file = new File([blob], `${kind}-${todayStr()}.png`, { type: 'image/png' });
     $('#e_box').innerHTML = `<img src="${u}" alt="${kind}" style="width:100%;border-radius:12px;border:1px solid var(--line)"><div class="row" style="margin-top:8px"><button class="btn primary block" id="e_share" type="button">📤 카톡·문자로 보내기</button><a class="btn block" href="${u}" download="${file.name}">⬇ 저장</a></div>`;

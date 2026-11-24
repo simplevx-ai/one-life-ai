@@ -52,6 +52,7 @@ async function viewRcptList() {
   view().innerHTML = `
     <div class="card hero"><b style="font-size:18px">🧾 간이영수증</b><div class="muted" style="margin-top:4px">현장노트 작업을 고르면 견적 내용이 영수증으로 바로 만들어집니다. 받은 돈은 장부에 같이 기록됩니다.</div></div>
     <div class="row" style="margin-bottom:10px"><a class="btn primary block" href="#/rcpt/new">✍️ 바로 영수증 쓰기</a><a class="btn block" href="#/ledger">📒 작업장부</a></div>
+    <a class="btn small" href="#/rcptset" style="margin-bottom:10px">⚙️ 영수증 설정(사업자번호·상호·도장)</a>
     <input id="rc_q" placeholder="고객 이름·전화·작업 종류로 찾기" style="margin-bottom:8px">
     <div class="card"><h2>작업 ${list.length}</h2><div id="rc_list"></div></div>`;
   $('#rc_q').oninput = (ev) => { q = ev.target.value; draw(); };
@@ -131,6 +132,9 @@ async function viewRcpt(id) {
         <tr><td>받은 금액</td><td class="r">${won(paid)}</td></tr>
         <tr><td>${left > 0 ? '남은 금액' : '상태'}</td><td class="r"><b style="color:${left > 0 ? 'var(--red)' : 'var(--green, #1F9D63)'}">${left > 0 ? won(left) : '완납'}</b></td></tr></tbody></table>
       <a class="btn small" href="#/est/${id}" style="margin-top:8px">✏️ 품목·금액 고치기(견적서)</a></div>
+    <div class="card"><div class="row spread"><h2 style="margin:0">🧾 간이영수증</h2><a class="btn small" href="#/rcptset">⚙️ 영수증 설정</a></div>
+      ${!(biz.bizNo && biz.owner) ? '<div class="muted" style="color:var(--red);font-size:13px;margin-top:6px">사업자등록번호·대표자 같은 공급자 정보가 비어 있습니다. ‘영수증 설정’에서 넣으면 영수증 칸에 들어갑니다.</div>' : ''}
+      <img id="rp_prev" alt="간이영수증 미리보기" style="width:100%;margin-top:8px;border-radius:8px;border:1px solid var(--line);background:#fff;min-height:120px"></div>
     ${left > 0 ? `<div class="card"><h2>💰 입금 기록 <span class="muted">→ 장부에 바로 반영</span></h2>
       <div class="grid2"><div><input id="rp_amt" type="number" inputmode="numeric" placeholder="${left}"></div><div><select id="rp_method">${opts(METHODS, '계좌이체')}</select></div></div>
       <button class="btn primary block" id="rp_add" type="button" style="margin-top:8px">입금 기록</button></div>` : ''}
@@ -159,11 +163,16 @@ async function viewRcpt(id) {
     await DB.put('jobs', { ...jj, ...patch });
     toast(`입금 ${won(amt)} 기록 · 장부에 반영됨`); render();
   };
+  // 실제 간이영수증 양식 이미지(미리보기와 보내기에 같은 그림)
+  const lastMethod = [...pays].sort((a, b) => (b.date || '').localeCompare(a.date || ''))[0]?.method || '';
+  const blobP = renderFormReceipt(e, T, j, c, biz, paid, lastMethod);
+  const prevUrl = URL.createObjectURL(await blobP);
+  if ($('#rp_prev')) $('#rp_prev').src = prevUrl;
   $('#rp_img').onclick = async () => {
-    const blob = await renderEstImage('영수증', e, T, j, c, biz, paid);
+    const blob = await blobP;
     const file = new File([blob], `영수증-${nameOf(c)}-${todayStr()}.png`, { type: 'image/png' });
-    const u = URL.createObjectURL(blob);
-    $('#rp_box').innerHTML = `<img src="${u}" alt="영수증" style="width:100%;border-radius:12px;border:1px solid var(--line)"><a class="btn block" href="${u}" download="${esc(file.name)}" style="margin-top:8px">⬇ 이미지 저장</a>`;
+    const u = prevUrl;
+    $('#rp_box').innerHTML = `<a class="btn block" href="${u}" download="${esc(file.name)}">⬇ 영수증 이미지 저장</a>`;
     if (navigator.canShare && navigator.canShare({ files: [file] })) {
       try { await navigator.share({ files: [file], title: '영수증', text: `영수증 - ${biz.name || ''}`.trim() }); await log('이미지 공유'); } catch { /* 취소 */ }
     } else toast('이 기기는 바로 공유가 안 됩니다. 이미지를 저장한 뒤 보내 주세요');

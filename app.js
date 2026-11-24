@@ -3,7 +3,7 @@
  */
 'use strict';
 
-const APP_VERSION = '0.12.0';
+const APP_VERSION = '0.13.0';
 const STATUSES = ['접수', '견적', '예약', '완료', '취소'];
 const METHODS = ['계좌이체', '현금', '카드', '기타'];
 const PHOTO_KINDS = ['시공 전', '시공 후', '기타', '고객 사진'];
@@ -146,6 +146,7 @@ const routes = [
   // 간이영수증 (rcpt.js) — 홈 화면 바로가기
   [/^#\/rcpt$/, 'sales', viewRcptList],
   [/^#\/rcpt\/new$/, 'sales', viewRcptNew],
+  [/^#\/rcptset$/, 'sales', viewRcptSet],
   [/^#\/rcpt\/([\w-]+)$/, 'sales', (m) => viewRcpt(m[1])],
   [/^#\/exp\/new$/, 'sales', () => viewExpense(null)],
   [/^#\/exp\/([\w-]+)$/, 'sales', (m) => viewExpense(m[1])],

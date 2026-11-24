@@ -52,7 +52,8 @@ const fill = (s, j) => s.replace(/\(\{product\}\)/g, j.product ? `(${j.product})
 
 async function bizInfo() {
   const b = await getSetting('biz', {});
-  return { name: b.name || '', phone: b.phone || '', blog: b.blog || '', as: b.as || '시공 후 1년 안에 같은 부위에 문제가 생기면 무상으로 점검해 드립니다.' };
+  // 간이영수증용 항목(bizNo·owner·addr·bizType·bizItem·bank·seal·rcptColor)도 같이 돌려준다
+  return { ...b, name: b.name || '', phone: b.phone || '', blog: b.blog || '', as: b.as || '시공 후 1년 안에 같은 부위에 문제가 생기면 무상으로 점검해 드립니다.' };
 }
 
 /* 자동 작성 */
@@ -184,7 +185,7 @@ async function viewReport(id) {
   drawPhotos();
 
   const readR = () => ({ title: $('#r_title').value.trim(), ...Object.fromEntries(SEC.map(([k]) => [k, $(`#r_${k}`).value.trim()])), log: (j.report && j.report.log) || autoReport(j, c, photos, biz).log });
-  const readBiz = () => ({ name: $('#b_name').value.trim(), phone: $('#b_phone').value.trim(), blog: $('#b_blog').value.trim(), as: biz.as });
+  const readBiz = () => ({ ...biz, name: $('#b_name').value.trim(), phone: $('#b_phone').value.trim(), blog: $('#b_blog').value.trim(), as: biz.as });
   const saveAll = async () => {
     const report = readR();
     const b = readBiz();
