@@ -3,7 +3,7 @@
  */
 'use strict';
 
-const APP_VERSION = '0.13.1';
+const APP_VERSION = '0.13.2';
 const STATUSES = ['접수', '견적', '예약', '완료', '취소'];
 const METHODS = ['계좌이체', '현금', '카드', '기타'];
 const PHOTO_KINDS = ['시공 전', '시공 후', '기타', '고객 사진'];
@@ -1262,6 +1262,19 @@ async function importBackup(text) {
 /* ───────── 시작 ───────── */
 (async () => {
   try { if (navigator.storage && navigator.storage.persist) await navigator.storage.persist(); } catch { /* 무시 */ }
-  if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
+  if ('serviceWorker' in navigator) {
+    const hadSW = !!navigator.serviceWorker.controller;
+    navigator.serviceWorker.register('sw.js').then((reg) => {
+      // 앱을 다시 볼 때마다 새 버전이 있는지 확인
+      document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') reg.update().catch(() => {}); });
+    }).catch(() => {});
+    // 새 버전이 켜지면 화면을 한 번 새로 불러온다. 쓰는 중인 화면이면 지우지 않도록 알림만
+    let reloaded = false;
+    navigator.serviceWorker.addEventListener('controllerchange', () => {
+      if (!hadSW || reloaded) return;
+      if (/#\/(new|edit|copy)|#\/(job|ledger)\/|#\/rcpt\/new/.test(location.hash) || document.querySelector('input:focus, textarea:focus')) { toast('새 버전이 나왔습니다. 저장한 뒤 앱을 다시 열면 바뀝니다'); return; }
+      reloaded = true; location.reload();
+    });
+  }
   render();
 })();
