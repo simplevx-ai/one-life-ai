@@ -3,7 +3,7 @@
  */
 'use strict';
 
-const APP_VERSION = '0.11.2';
+const APP_VERSION = '0.12.0';
 const STATUSES = ['접수', '견적', '예약', '완료', '취소'];
 const METHODS = ['계좌이체', '현금', '카드', '기타'];
 const PHOTO_KINDS = ['시공 전', '시공 후', '기타', '고객 사진'];
@@ -143,6 +143,10 @@ const routes = [
   [/^#\/prices$/, 'jobs', viewPrices],
   [/^#\/bizset$/, 'jobs', viewBizSet],
   [/^#\/ledger$/, 'sales', viewLedger],
+  // 간이영수증 (rcpt.js) — 홈 화면 바로가기
+  [/^#\/rcpt$/, 'sales', viewRcptList],
+  [/^#\/rcpt\/new$/, 'sales', viewRcptNew],
+  [/^#\/rcpt\/([\w-]+)$/, 'sales', (m) => viewRcpt(m[1])],
   [/^#\/exp\/new$/, 'sales', () => viewExpense(null)],
   [/^#\/exp\/([\w-]+)$/, 'sales', (m) => viewExpense(m[1])],
   [/^#\/settings$/, 'settings', viewSettings],
@@ -307,6 +311,12 @@ async function viewHome() {
     ...(contacts.length ? [{ lv: 'info', icon: '☎️', text: `연락할 고객 ${contacts.length}명 (${contacts.slice(0, 2).map((x) => nameOf(x.c)).join(', ')}${contacts.length > 2 ? ' 외' : ''})`, href: '#/biz' }] : [])];
   const alerts = [...buildAlerts({ jobs, pays, tasks, cmap, today, needBackup, daysSinceBackup, oa }), ...bizAl, ...spAl.map((a) => ({ lv: 'info', ...a }))];
   const brief = buildBriefing({ todayJobs, waiting, overdue, monthSales, unpaid, openTasks, notesToday, oa });
+  // 구글 캘린더(동기화 때 받아 둔 것): 오늘·앞으로 7일
+  const gevs = await gcalEvents();
+  const gToday = gcalOn(gevs, today);
+  const gNext = [...Array(7)].flatMap((_, i) => gcalOn(gevs, addDays(i + 1)).filter((e) => e.start.slice(0, 10) === addDays(i + 1)).map((e) => ({ e, d: addDays(i + 1) })));
+  if (gToday.length) brief.splice(1, 0, `구글 캘린더 오늘 일정 ${gToday.length}건: ${gToday.slice(0, 3).map((e) => `${gcalTime(e, today)} ${e.title}`).join(', ')}${gToday.length > 3 ? ' 외' : ''}.`);
+  const gLine = (e, d, showDate) => `<a class="item" href="#" data-gcal="${esc(e.id)}" style="border-left:4px solid var(--gold)"><div class="row spread"><span class="t">${esc(showDate ? fmtDate(d) + ' ' : '')}${esc(gcalTime(e, d))} · ${esc(e.title)}</span><span class="badge">📆 구글</span></div>${e.location ? `<div class="muted">📍 ${esc(e.location)}</div>` : ''}</a>`;
 
   const jobLine = (j, showDate) => {
     const c = cmap[j.customerId] || {};
@@ -337,6 +347,8 @@ async function viewHome() {
       ${todayJobs.length ? todayJobs.map((j) => jobLine(j, false)).join('') : '<div class="muted">오늘 일정 없음</div>'}
       <div class="muted" style="margin:10px 0 4px">앞으로 7일</div>
       ${nextJobs.length ? nextJobs.map((j) => jobLine(j, true)).join('') : '<div class="muted">예정 없음</div>'}
+      ${gevs.length ? `<div class="muted" style="margin:12px 0 4px">📆 구글 캘린더 (오늘·7일)</div>
+      ${[...gToday.map((e) => gLine(e, today, false)), ...gNext.map((x) => gLine(x.e, x.d, true))].join('') || '<div class="muted">구글 캘린더 일정 없음</div>'}` : ''}
     </div>
 
     <a class="card hero" href="#/sales" style="display:block;text-decoration:none">
@@ -389,6 +401,9 @@ async function viewHome() {
     <div class="muted" style="text-align:center">v${APP_VERSION} · 데이터는 이 폰에 저장${sheetOn ? ' · 구글 시트 동기화 켜짐' : ''}</div>`;
 
   if (sheetOn) $('#homeSync').onclick = (e) => runSync(e.target);
+  view().querySelectorAll('[data-gcal]').forEach((a) => {
+    a.onclick = (ev) => { ev.preventDefault(); const e = gevs.find((x) => x.id === a.dataset.gcal); if (e) gcalInfo(e); };
+  });
   view().querySelectorAll('[data-alert]').forEach((a) => {
     const al = alerts[+a.dataset.alert];
     if (al.tab) a.addEventListener('click', () => sessionStorage.setItem('jobsTab', al.tab));
@@ -698,7 +713,7 @@ async function viewJob(id) {
     </div>
     <div class="card">
       <h2>현장 체크·견적·보고서</h2>
-      <div class="row" style="margin-bottom:8px"><a class="btn block" href="#/fc/${job.id}">📋 현장 체크</a><a class="btn block" href="#/est/${job.id}">🧾 견적서</a></div>
+      <div class="row" style="margin-bottom:8px"><a class="btn block" href="#/fc/${job.id}">📋 현장 체크</a><a class="btn block" href="#/est/${job.id}">🧾 견적서</a><a class="btn block" href="#/rcpt/${job.id}">🧾 영수증</a></div>
       <a class="btn primary block" href="#/report/${job.id}" style="margin-bottom:8px">📄 현장 보고서 (사진으로 고객용 보고서)</a>
       <button class="btn block" id="copyBlog" type="button">📋 블로그 자료 복사</button>
       <div class="muted" style="margin-top:6px">지역·작업·제품·문제·해결·키워드를 정리해 복사합니다. Claude나 블로그 글쓰기에 붙여넣으세요.</div>
@@ -1077,11 +1092,39 @@ async function syncSheet() {
   return { created, fromSheet, sent: updates.length, added: (res.appended || []).length, cases: res.cases || 0 };
 }
 
+/* ───────── 구글 캘린더(읽기 전용) ─────────
+   시트 스크립트 v4의 gcal로 지난 7일~앞으로 60일 일정을 받아 settings 'gcal'에 저장한다.
+   앱에서 캘린더를 고치지는 않는다(보기 전용). */
+async function syncGcal() {
+  const r = await callSheet('gcal', { from: addDays(-7), to: addDays(60) });
+  const events = (r.events || []).map((e) => ({ id: String(e.id), title: String(e.title || ''), start: String(e.start || ''), end: String(e.end || ''), allDay: !!e.allDay, location: String(e.location || ''), cal: String(e.cal || '') }));
+  await setSetting('gcal', { at: Date.now(), events });
+  return events.length;
+}
+async function gcalEvents() { return ((await getSetting('gcal', null)) || {}).events || []; }
+// 그날 보일 일정: 종일 일정은 end 전날까지, 시간 일정은 시작일~끝나는 날
+function gcalOn(evs, d) {
+  return evs.filter((e) => {
+    const s = e.start.slice(0, 10);
+    if (e.allDay) return s <= d && d < (e.end || addD(s, 1));
+    const en = (e.end || e.start).slice(0, 10);
+    const endsAtMidnight = (e.end || '').slice(11, 16) === '00:00';
+    return s === d || (s < d && (d < en || (d === en && !endsAtMidnight)));
+  });
+}
+const gcalTime = (e, d) => (e.allDay ? '종일' : e.start.slice(0, 10) === d ? e.start.slice(11, 16) : '계속');
+function gcalInfo(e) {
+  alert(`📆 ${e.title}\n${e.allDay ? `${fmtDate(e.start)} 종일` : `${fmtDate(e.start)} ${e.start.slice(11, 16)} ~ ${e.end.slice(0, 10) === e.start.slice(0, 10) ? e.end.slice(11, 16) : fmtDate(e.end) + ' ' + e.end.slice(11, 16)}`}${e.location ? `\n📍 ${e.location}` : ''}\n캘린더: ${e.cal}\n\n※ 구글 캘린더 일정은 보기만 됩니다. 수정은 구글 캘린더 앱에서 하세요.`);
+}
+
 async function runSync(btn) {
   if (btn) { btn.disabled = true; btn.textContent = '동기화 중…'; }
   try {
     const r = await syncSheet();
-    toast(`동기화 완료: 새로 가져옴 ${r.created} · 시트 반영 ${r.fromSheet} · 시트로 보냄 ${r.sent + r.added} · 작업사례 ${r.cases}`);
+    let cal = '';
+    try { cal = ` · 캘린더 ${await syncGcal()}건`; }
+    catch (e) { cal = /옛 버전|새 버전/.test(e.message) ? ' · 캘린더: 시트 스크립트 v4로 바꿔야 함' : ` · 캘린더 실패(${e.message})`; }
+    toast(`동기화 완료: 새로 가져옴 ${r.created} · 시트 반영 ${r.fromSheet} · 시트로 보냄 ${r.sent + r.added} · 작업사례 ${r.cases}${cal}`);
     render();
   } catch (e) {
     alert('동기화 실패: ' + e.message);

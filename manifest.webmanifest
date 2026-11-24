@@ -12,5 +12,27 @@
     { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
     { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
     { "src": "icons/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ],
+  "shortcuts": [
+    {
+      "name": "간이영수증",
+      "short_name": "간이영수증",
+      "description": "현장노트 작업으로 영수증 만들고 문자·이메일로 보내기",
+      "url": "./?from=shortcut#/rcpt",
+      "icons": [
+        { "src": "icons/shortcut-receipt-96.png", "sizes": "96x96", "type": "image/png" },
+        { "src": "icons/shortcut-receipt-192.png", "sizes": "192x192", "type": "image/png" }
+      ]
+    },
+    {
+      "name": "작업장부",
+      "short_name": "작업장부",
+      "description": "수입·지출·미수금 장부",
+      "url": "./?from=shortcut#/ledger",
+      "icons": [
+        { "src": "icons/shortcut-ledger-96.png", "sizes": "96x96", "type": "image/png" },
+        { "src": "icons/shortcut-ledger-192.png", "sizes": "192x192", "type": "image/png" }
+      ]
+    }
   ]
 }

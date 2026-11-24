@@ -81,7 +81,7 @@ async function viewBiz() {
     <button class="btn block" type="button" disabled style="margin-bottom:12px">🎤 음성 접수 (2차 예정)</button>
     <div class="card"><div class="tiles">
       <a class="tile" href="#/cal"><i>🗓</i>일정 달력</a><a class="tile" href="#/jobs"><i>📋</i>작업 목록</a><a class="tile" href="#/customers"><i>👤</i>고객</a>
-      <a class="tile" href="#/ledger"><i>📒</i>장부</a><a class="tile" href="#/prices"><i>💲</i>단가표</a><a class="tile" href="#/bizset"><i>🏢</i>근무일 설정</a></div></div>`;
+      <a class="tile" href="#/ledger"><i>📒</i>장부</a><a class="tile" href="#/rcpt"><i>🧾</i>간이영수증</a><a class="tile" href="#/prices"><i>💲</i>단가표</a><a class="tile" href="#/bizset"><i>🏢</i>근무일 설정</a></div></div>`;
 }
 
 /* 연락할 고객: 다음 연락일이 됐거나, 재방문 시즌(방충망 봄 전·컴퓨터 1년 점검) */
@@ -367,9 +367,13 @@ async function viewCal() {
   const qs = new URLSearchParams(location.hash.split('?')[1] || '');
   const mode = qs.get('v') || 'month';
   const base = qs.get('d') || todayStr();
-  const [jobs, custs, cfg] = await Promise.all([DB.all('jobs'), DB.all('customers'), bizCfg()]);
+  const [jobs, custs, cfg, gevs, gmeta, sheetCfg] = await Promise.all([DB.all('jobs'), DB.all('customers'), bizCfg(), gcalEvents(), getSetting('gcal', null), getSetting('sheet', {})]);
   const cmap = Object.fromEntries(custs.map((c) => [c.id, c]));
   const on = (d) => jobs.filter((j) => (j.scheduledAt || '').slice(0, 10) === d).sort((a, b) => (a.scheduledAt || '').localeCompare(b.scheduledAt || ''));
+  // 구글 캘린더 일정(보기 전용, 끌어서 옮기기 안 됨)
+  const gOn = (d) => gcalOn(gevs, d).sort((a, b) => (a.allDay ? '' : a.start).localeCompare(b.allDay ? '' : b.start));
+  const gChip = (e, d) => `<div data-gcal="${esc(e.id)}" style="font-size:11px;background:rgba(245,196,66,.28);border-left:3px solid var(--gold);border-radius:4px;padding:1px 3px;margin-top:2px;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;cursor:pointer">📆${esc(e.allDay ? '' : gcalTime(e, d) + ' ')}${esc(e.title.slice(0, 8))}</div>`;
+  const gItem = (e, d) => `<a class="item" href="#" data-gcal="${esc(e.id)}" style="margin:6px 0 0;padding:8px;border-left:4px solid var(--gold)"><div class="row spread"><span>📆 ${esc(gcalTime(e, d))} ${esc(e.title)}</span><span class="badge">구글</span></div>${e.location ? `<div class="muted">📍 ${esc(e.location)}</div>` : ''}</a>`;
   const chip = (j) => `<div class="calchip" draggable="true" data-job="${j.id}" style="font-size:11px;background:${j.status === '취소' ? 'var(--line)' : j.status === '완료' ? 'rgba(31,157,99,.18)' : 'rgba(28,96,214,.16)'};border-radius:4px;padding:1px 3px;margin-top:2px;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;${j.status === '취소' ? 'text-decoration:line-through' : ''};touch-action:none">${tIcon(j.type)}${esc((j.scheduledAt || '').slice(11, 16))} ${esc(nameOf(cmap[j.customerId]).slice(0, 4))}</div>`;
   let cells = '';
   let title = '', prev, next;
@@ -378,20 +382,29 @@ async function viewCal() {
     const first = new Date(y, m - 1, 1), days = new Date(y, m, 0).getDate(), off = (first.getDay() + 6) % 7;
     title = `${y}년 ${m}월`;
     prev = nowISO(new Date(y, m - 2, 1)).slice(0, 10); next = nowISO(new Date(y, m, 1)).slice(0, 10);
-    cells = '<div></div>'.repeat(off) + [...Array(days)].map((_, i) => { const d = `${y}-${pad(m)}-${pad(i + 1)}`; const off2 = isOfficeDay(cfg, d); return `<div class="calcell" data-day="${d}" style="border:1px solid var(--line);border-radius:8px;min-height:64px;padding:2px;${off2 ? 'background:rgba(245,196,66,.18);' : ''}${d === todayStr() ? 'outline:2px solid var(--blue);' : ''}"><div style="font-size:12px;display:flex;justify-content:space-between"><a href="#/cal?v=week&d=${d}" style="color:inherit">${i + 1}</a>${off2 ? '<span title="관리사무소 근무">🏢</span>' : ''}</div>${on(d).map(chip).join('')}</div>`; }).join('');
+    cells = '<div></div>'.repeat(off) + [...Array(days)].map((_, i) => { const d = `${y}-${pad(m)}-${pad(i + 1)}`; const off2 = isOfficeDay(cfg, d); return `<div class="calcell" data-day="${d}" style="border:1px solid var(--line);border-radius:8px;min-height:64px;padding:2px;${off2 ? 'background:rgba(245,196,66,.18);' : ''}${d === todayStr() ? 'outline:2px solid var(--blue);' : ''}"><div style="font-size:12px;display:flex;justify-content:space-between"><a href="#/cal?v=week&d=${d}" style="color:inherit">${i + 1}</a>${off2 ? '<span title="관리사무소 근무">🏢</span>' : ''}</div>${on(d).map(chip).join('')}${gOn(d).map((e) => gChip(e, d)).join('')}</div>`; }).join('');
   } else {
     const ws = weekStart(new Date(base + 'T00:00'));
     title = `${ws.slice(5)} 주`;
     prev = addD(ws, -7); next = addD(ws, 7);
     cells = [...Array(7)].map((_, i) => { const d = addD(ws, i); const off2 = isOfficeDay(cfg, d); return `<div class="calcell" data-day="${d}" style="border:1px solid var(--line);border-radius:10px;padding:8px;margin-bottom:6px;${off2 ? 'background:rgba(245,196,66,.18);' : ''}${d === todayStr() ? 'outline:2px solid var(--blue);' : ''}"><div class="row spread"><b>${esc(fmtDate(d))}</b>${off2 ? '<span class="badge">🏢 관리사무소</span>' : ''}</div>
-      ${on(d).map((j) => `<a class="item calchip" draggable="true" data-job="${j.id}" href="#/job/${j.id}" style="margin:6px 0 0;padding:8px;touch-action:none"><div class="row spread"><span>${tIcon(j.type)} ${esc((j.scheduledAt || '').slice(11, 16))} ${esc(nameOf(cmap[j.customerId]))}</span><span class="badge s-${j.status}">${esc(j.status)}</span></div><div class="muted">${esc([j.type, j.area].filter(Boolean).join(' · '))}</div></a>`).join('') || '<div class="muted" style="font-size:13px">없음</div>'}</div>`; }).join('');
+      ${on(d).map((j) => `<a class="item calchip" draggable="true" data-job="${j.id}" href="#/job/${j.id}" style="margin:6px 0 0;padding:8px;touch-action:none"><div class="row spread"><span>${tIcon(j.type)} ${esc((j.scheduledAt || '').slice(11, 16))} ${esc(nameOf(cmap[j.customerId]))}</span><span class="badge s-${j.status}">${esc(j.status)}</span></div><div class="muted">${esc([j.type, j.area].filter(Boolean).join(' · '))}</div></a>`).join('')}${gOn(d).map((e) => gItem(e, d)).join('')}${on(d).length || gOn(d).length ? '' : '<div class="muted" style="font-size:13px">없음</div>'}</div>`; }).join('');
   }
   view().innerHTML = `
     <div class="row spread" style="margin-bottom:8px"><a class="btn small" href="#/cal?v=${mode}&d=${prev}">‹</a><b>${title}</b><a class="btn small" href="#/cal?v=${mode}&d=${next}">›</a></div>
-    <div class="chips"><a class="chip${mode === 'month' ? ' on' : ''}" href="#/cal?v=month&d=${base}">월</a><a class="chip${mode === 'week' ? ' on' : ''}" href="#/cal?v=week&d=${base}">주</a><a class="chip" href="#/cal?v=${mode}&d=${todayStr()}">오늘</a><a class="chip" href="#/bizset">🏢 근무일 설정</a></div>
-    <div class="muted" style="margin-bottom:6px;font-size:13px">작업을 길게 눌러 다른 날짜로 끌면 일정이 옮겨집니다.</div>
+    <div class="chips"><a class="chip${mode === 'month' ? ' on' : ''}" href="#/cal?v=month&d=${base}">월</a><a class="chip${mode === 'week' ? ' on' : ''}" href="#/cal?v=week&d=${base}">주</a><a class="chip" href="#/cal?v=${mode}&d=${todayStr()}">오늘</a><a class="chip" href="#/bizset">🏢 근무일 설정</a>${sheetCfg.url && sheetCfg.key ? '<button class="chip" id="gcalBtn" type="button">📆 구글 캘린더 받기</button>' : ''}</div>
+    <div class="muted" style="margin-bottom:6px;font-size:13px">작업을 길게 눌러 다른 날짜로 끌면 일정이 옮겨집니다. 📆 노란 일정은 구글 캘린더(보기 전용)${gmeta && gmeta.at ? ` · ${new Date(gmeta.at).toLocaleString('ko-KR', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })} 받음` : ''}.</div>
     ${mode === 'month' ? `<div style="display:grid;grid-template-columns:repeat(7,1fr);gap:3px">${['월', '화', '수', '목', '금', '토', '일'].map((d) => `<div class="muted" style="font-size:12px;text-align:center">${d}</div>`).join('')}${cells}</div>` : cells}`;
   enableCalDrag(cfg);
+  view().querySelectorAll('[data-gcal]').forEach((a) => {
+    a.onclick = (ev) => { ev.preventDefault(); const e = gevs.find((x) => x.id === a.dataset.gcal); if (e) gcalInfo(e); };
+  });
+  const gb = $('#gcalBtn');
+  if (gb) gb.onclick = async () => {
+    gb.disabled = true; gb.textContent = '받는 중…';
+    try { toast(`구글 캘린더 ${await syncGcal()}건을 받았습니다`); render(); }
+    catch (e) { alert('구글 캘린더 받기 실패: ' + (/옛 버전|새 버전/.test(e.message) ? '시트의 Apps Script를 v4 코드로 바꾸고 새 버전으로 배포해 주세요' : e.message)); gb.disabled = false; gb.textContent = '📆 구글 캘린더 받기'; }
+  };
 }
 // weekStart·addD·buzz는 sport.js에 있는 것을 같이 쓴다
 
@@ -487,7 +500,7 @@ async function viewLedger() {
     E.forEach((x) => { const k = x.jobId ? typeKey((jmap[x.jobId] || {}).type) : '공통'; (byT[k] = byT[k] || { inc: 0, exp: 0 }).exp += +x.amount || 0; });
     const unpaid = jobs.filter((j) => j.status === '완료').map((j) => ({ j, left: (+j.quote || 0) - paidOf(j.id, pays) })).filter((x) => x.left > 0);
     view().innerHTML = `
-      <div class="row" style="margin-bottom:10px"><input type="month" id="lg_m" value="${ym}" style="flex:1"><a class="btn small primary" href="#/exp/new">+ 지출</a></div>
+      <div class="row" style="margin-bottom:10px"><input type="month" id="lg_m" value="${ym}" style="flex:1"><a class="btn small" href="#/rcpt">🧾 영수증</a><a class="btn small primary" href="#/exp/new">+ 지출</a></div>
       <div class="card hero"><div class="grid2" style="grid-template-columns:repeat(3,1fr)"><div><div class="muted">수입</div><b style="font-size:19px">${won(inc)}</b></div><div><div class="muted">지출</div><b style="font-size:19px">${won(out)}</b></div><div><div class="muted">순이익</div><b style="font-size:19px">${won(inc - out)}</b></div></div></div>
       <div class="card"><h2>작업 종류별</h2><table><thead><tr><th>종류</th><th class="r">수입</th><th class="r">지출</th><th class="r">순이익</th></tr></thead><tbody>
         ${Object.entries(byT).map(([k, v]) => `<tr><td>${TYPE_ICON[k] || '📦'} ${esc(k)}</td><td class="r">${won(v.inc)}</td><td class="r">${won(v.exp)}</td><td class="r"><b>${won(v.inc - v.exp)}</b></td></tr>`).join('') || '<tr><td colspan="4" class="muted">기록 없음</td></tr>'}</tbody></table>
