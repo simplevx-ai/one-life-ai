@@ -14,6 +14,7 @@ async function baCfg() {
 
 /* 사람이 쓴 것 같은 글 요청문 — 업종이 무엇이든 [업종]·[지역]만 바뀐다 */
 function baPrompt(cfg, d, rules) {
+  if (d.kind === 'info') return baPromptInfo(cfg, d, rules); // 정보·조회수형(애드센스·애드포스트)
   const chans = BA_CH.filter(([k]) => d.chans.includes(k));
   const one = (k) => ({
     naver: `===네이버===
@@ -44,7 +45,7 @@ function baPrompt(cfg, d, rules) {
 - 네이버 카테고리: ${cfg.cat || '(확인 필요)'} / 목표: ${cfg.goal}
 - 대표 키워드: ${d.kw || '(사진과 메모를 보고 [지역]+[작업] 모양으로 하나 정해 첫 줄에 알려 주세요)'}
 - 오늘 작업 메모: ${d.memo || '(없음 — 사진만 보고 쓰기)'}
-- 첨부한 사진: ${d.n}장 (찍은 순서 = [사진1]~[사진${d.n}])
+- 첨부한 사진: ${d.n}장 (찍은 순서 = [사진1]~[사진${d.n}])${d.ai && d.ai.length ? `\n- [사진${d.ai.join('], [사진')}]은 AI로 만든 참고 그림입니다. 현장 사진처럼 쓰지 말고 설명 끝에 '(AI 생성 이미지)'를 붙입니다.` : ''}
 - 말투: ${cfg.tone === '전문' ? '차분하고 믿음 가는 전문가 말투(존댓말)' : '옆집 사장님처럼 편안한 존댓말, 가끔 짧은 혼잣말'}
 ${cfg.contact ? `- 문의 안내 문구: ${cfg.contact}\n` : ''}${cfg.avoid ? `- 쓰지 말 것: ${cfg.avoid}\n` : ''}
 [사람이 쓴 글처럼 — 꼭 지킬 것]
@@ -87,7 +88,9 @@ function baParse(text) {
     if (dm) { desc = dm[1].replace(/\*\*/g, '').trim(); s = s.replace(dm[0], '').trim(); }
     let slug = ''; const um = s.match(/^\s*(?:\*\*)?주소\s*[:：]\s*(.+)$/m);
     if (um) { slug = um[1].replace(/\*\*|`/g, '').trim().toLowerCase().replace(/[^a-z0-9-]+/g, '-').replace(/^-+|-+$/g, ''); s = s.replace(um[0], '').trim(); }
-    out[mk.k] = { title, body: s.replace(/^본문\s*[:：]\s*/m, ''), tags, desc, slug };
+    let img = ''; const im = s.match(/^\s*(?:\*\*)?대표\s*그림(?:\s*\(영문\))?\s*[:：]\s*(.+)$/m);
+    if (im) { img = im[1].replace(/\*\*/g, '').trim(); s = s.replace(im[0], '').trim(); }
+    out[mk.k] = { title, body: s.replace(/^본문\s*[:：]\s*/m, ''), tags, desc, slug, img };
   });
   return out;
 }
@@ -117,10 +120,13 @@ async function viewBlogAuto() {
   view().innerHTML = `
     <details class="card" id="baPlanCard"${sessionStorage.getItem('baPlanOpen') ? ' open' : ''}><summary><b>📅 오늘 발행 (편수·방식 고르기)</b></summary><div id="baPlan" style="margin-top:6px"></div></details>
     ${needSet ? '<div class="card warnbox">먼저 아래 ⚙️ 기본 정보(업종·지역)를 넣고 저장하세요. 어떤 업종이든 이 칸만 바꾸면 됩니다.</div>' : ''}
+    <div class="card"><label style="margin-top:0">글 종류</label><div class="chips" id="baKind">${[['case', '🛠 시공 후기(실제 사진)'], ['info', '📈 정보·조회수형(애드센스·애드포스트)']].map(([k, n]) => `<button class="chip${(cur?.kind || cfg.kind || 'case') === k ? ' on' : ''}" data-k="${k}">${n}</button>`).join('')}</div>
+      <div class="muted" style="font-size:12px">정보·조회수형은 경험을 지어내지 않는 정보 글 규칙과 광고 정책(클릭 유도 금지 등)이 요청문에 들어갑니다. 시공 블로그와 다른 주제면 블로그(또는 카테고리)를 따로 쓰는 게 좋습니다.</div></div>
     <div class="card"><h2>① 사진 넣기</h2>
       <div class="muted" style="font-size:13px">찍은 순서대로 넣으세요(=[사진1], [사진2] …). 사진만 넣어도 됩니다.</div>
       <input id="baFiles" type="file" accept="image/*" multiple style="margin-top:6px">
-      ${photos.length ? `<div class="photos" style="margin-top:8px">${photos.map((p, i) => `<div class="photo"><img src="${urls[i]}" alt=""><span>사진${i + 1}</span></div>`).join('')}</div>` : ''}
+      ${photos.length ? `<div class="photos" style="margin-top:8px">${photos.map((p, i) => `<div class="photo"><img src="${urls[i]}" alt=""><span>사진${i + 1}${p.kind === 'AI 생성' ? ' · AI' : ''}</span></div>`).join('')}</div>` : ''}
+      <details style="margin-top:8px"><summary><b>🎨 AI 그림 만들기 (클라우드플레어)</b></summary><div id="baAi"></div></details>
       <label for="baMemo">짧은 메모 (선택)</label><textarea id="baMemo" rows="3" placeholder="예: 20년 된 아파트, 방충망 삭아서 교체, 미세방충망으로">${esc(cur?.memo || '')}</textarea>
       <div class="grid2"><div><label for="baKw">대표 키워드 (선택)</label><input id="baKw" value="${esc(cur?.kw || '')}" placeholder="예: 수성구 방충망 교체"></div><div><label for="baReg">지역 (이번 글)</label><input id="baReg" value="${esc(cur?.region || cfg.region)}"></div></div>
       <label>올릴 곳</label><div class="chips" id="baCh">${BA_CH.map(([k, n]) => `<button class="chip${(cur?.chans || cfg.chans).includes(k) ? ' on' : ''}" data-k="${k}">${n}</button>`).join('')}</div>
@@ -139,6 +145,7 @@ async function viewBlogAuto() {
     <details class="card"${needSet ? ' open' : ''}><summary><b>⚙️ 기본 정보 (모든 글에 공통)</b></summary>
       <div class="grid2" style="margin-top:6px"><div><label for="bcType">업종 (블로그 주제 1개)</label><input id="bcType" value="${esc(cfg.type)}" placeholder="예: 방충망 시공"></div><div><label for="bcRegion">기본 지역</label><input id="bcRegion" value="${esc(cfg.region)}" placeholder="예: 대구 수성구"></div>
         <div><label for="bcBiz">업체명</label><input id="bcBiz" value="${esc(cfg.biz)}"></div><div><label for="bcCat">네이버 카테고리</label><input id="bcCat" value="${esc(cfg.cat)}" placeholder="예: 홈케어(생활·인테리어)"></div></div>
+      <label for="bcInfo">정보·조회수형 블로그 주제 (선택)</label><input id="bcInfo" value="${esc(cfg.infoTopic || '')}" placeholder="예: 생활 꿀팁·집 관리, 정부 지원금">
       <label for="bcGoal">목표</label><input id="bcGoal" value="${esc(cfg.goal)}">
       <label for="bcContact">문의 안내 문구</label><input id="bcContact" value="${esc(cfg.contact)}" placeholder="예: 견적 문의는 010-0000-0000 문자로 사진과 지역을 보내 주세요">
       <label for="bcAvoid">쓰지 말 것 (선택)</label><input id="bcAvoid" value="${esc(cfg.avoid)}" placeholder="예: 경쟁 업체 이름, 할인 약속">
@@ -151,7 +158,8 @@ async function viewBlogAuto() {
     ${drafts.length ? `<div class="card"><h2>지난 글</h2>${drafts.slice(0, 15).map((x) => `<a class="item" href="#" data-open="${x.id}"><div class="t">${esc(x.title || x.kw || '(제목 없음)')}</div><div class="muted">${esc(x.at.slice(0, 10))} · 사진 ${x.n || 0}장</div></a>`).join('')}</div>` : ''}`;
 
   const chans = () => [...$('#baCh').querySelectorAll('.chip.on')].map((b) => b.dataset.k);
-  const data = () => ({ memo: $('#baMemo').value.trim(), kw: $('#baKw').value.trim(), region: $('#baReg').value.trim(), chans: chans(), n: photos.length });
+  const kind = () => ($('#baKind .chip.on') || {}).dataset?.k || 'case';
+  const data = () => ({ memo: $('#baMemo').value.trim(), kw: $('#baKw').value.trim(), region: $('#baReg').value.trim(), chans: chans(), n: photos.length, kind: kind(), ai: photos.map((p, i) => (p.kind === 'AI 생성' ? i + 1 : 0)).filter(Boolean) });
   const pv = () => { $('#baPv').textContent = baPrompt(cfg, data(), rules); };
   const saveDraft = async (extra = {}) => {
     const list = await getSetting('blogDrafts', []);
@@ -161,12 +169,13 @@ async function viewBlogAuto() {
     await setSetting('blogDrafts', [d, ...list.filter((x) => x.id !== id)].slice(0, 30));
     sessionStorage.setItem('baCur', id); return d;
   };
+  $('#baKind').onclick = async (e) => { const b = e.target.closest('[data-k]'); if (!b) return; $('#baKind').querySelectorAll('.chip').forEach((x) => x.classList.toggle('on', x === b)); pv(); if (cur) await saveDraft(); };
   $('#baCh').onclick = (e) => { const b = e.target.closest('[data-k]'); if (!b) return; b.classList.toggle('on'); pv(); };
   ['baMemo', 'baKw', 'baReg'].forEach((id) => $('#' + id).addEventListener('input', pv));
   $('#bcTone').onclick = (e) => { const b = e.target.closest('[data-t]'); if (!b) return; $('#bcTone').querySelectorAll('.chip').forEach((x) => x.classList.toggle('on', x === b)); };
   $('#bcSave').onclick = async () => {
     await setSetting('blogAuto', { ...cfg, type: $('#bcType').value.trim(), region: $('#bcRegion').value.trim(), biz: $('#bcBiz').value.trim(), cat: $('#bcCat').value.trim(), goal: $('#bcGoal').value.trim() || cfg.goal,
-      contact: $('#bcContact').value.trim(), avoid: $('#bcAvoid').value.trim(), tone: ($('#bcTone .chip.on') || {}).dataset?.t || '친근', bloggerId: digits($('#bcBid').value) });
+      contact: $('#bcContact').value.trim(), infoTopic: $('#bcInfo').value.trim(), avoid: $('#bcAvoid').value.trim(), tone: ($('#bcTone .chip.on') || {}).dataset?.t || '친근', bloggerId: digits($('#bcBid').value) });
     toast('기본 정보를 저장했습니다'); viewBlogAuto();
   };
   $('#baNew').onclick = () => { sessionStorage.removeItem('baCur'); viewBlogAuto(); };
@@ -215,6 +224,9 @@ async function viewBlogAuto() {
       <div class="muted" style="font-size:12px;margin-top:6px">함께 하면 좋은 것: 카테고리를 업종 하나로 정리(예: 시공 후기 / 고르는 법 / 자주 묻는 질문), 프로필 사진은 작업복 차림이나 로고, 대표 이미지는 시공 후 사진.</div>`;
     box.onclick = async (e) => { const t = e.target; const v = t.dataset.ic || (t.dataset.icf && $('#' + t.dataset.icf).value); if (!v) return; try { await navigator.clipboard.writeText(v); toast('복사했습니다'); } catch { prompt('복사해서 쓰세요', v); } };
   }
+  // 🎨 AI 그림 → 이 글 사진에 넣기
+  const addAiPhoto = async (blob) => { const d = await saveDraft(); await DB.put('photos', { id: uid(), jobId: d.id, kind: 'AI 생성', order: photos.length, blob, createdAt: nowISO() }); await saveDraft({ n: photos.length + 1 }); toast('AI 그림을 이 글 사진에 넣었습니다'); viewBlogAuto(); };
+  baAiUI($('#baAi'), cfg, addAiPhoto);
   // 🔐 계정 메모
   baVaultUI($('#baVault'));
   // 📅 오늘 발행
@@ -241,12 +253,15 @@ async function viewBlogAuto() {
         <div class="grid2" style="margin-top:6px"><button class="btn small" data-copy="desc" data-k="${k}" type="button">검색 설명 복사</button><button class="btn small" data-copy="slug" data-k="${k}" type="button">주소 복사</button></div>` : ''}
         <div class="grid2" style="margin-top:8px"><button class="btn" data-copy="title" data-k="${k}" type="button">제목 복사</button><button class="btn" data-copy="body" data-k="${k}" type="button">본문 복사</button>
           <button class="btn" data-copy="tags" data-k="${k}" type="button">태그 복사</button><button class="btn primary" data-write="${k}" type="button">✏️ 글쓰기 화면 열기</button></div>
+        ${x.img ? `<div class="muted" style="font-size:12px;margin-top:6px">대표 그림 제안: ${esc(x.img)}</div><button class="btn block" data-aiimg="${k}" type="button" style="margin-top:4px">🎨 이 대표 그림 만들어 사진에 넣기</button>` : ''}
         ${k !== 'blogger' ? `<button class="btn primary block" data-rich="${k}" type="button" style="margin-top:6px">🎨 본문 서식 복사 (글꼴·색·줄바꿈 그대로)</button>` : ''}
         ${k === 'blogger' ? `<button class="btn primary block" data-post="${k}" type="button" style="margin-top:6px">🔵 구글 블로그에 임시저장으로 올리기</button><div class="muted" style="font-size:12px">사진은 올라가지 않습니다. Blogger 편집 화면에서 [사진n] 자리에 넣고 '게시'를 눌러 공개하세요.</div>` : ''}
         ${k === 'naver' ? '<div class="muted" style="font-size:12px;margin-top:4px">네이버 글쓰기에서 [사진n] 자리마다 같은 번호 사진을 넣으세요. 태그는 본문 아래 태그 칸에.</div>' : ''}</div>`; }).join('');
     const val = (k, f) => $(`#baOut [data-k="${k}"][data-f="${f}"]`).value;
     $('#baOut').onclick = async (e) => {
       const c = e.target.closest('[data-copy]'), w = e.target.closest('[data-write]'), p = e.target.closest('[data-post]'), rc = e.target.closest('[data-rich]');
+      const ai = e.target.closest('[data-aiimg]');
+      if (ai) { const pr = (parsed[ai.dataset.k] || {}).img; if (!pr) return; ai.disabled = true; ai.textContent = '그리는 중…'; try { await addAiPhoto(await baAiImage(pr, true)); } catch (err) { ai.disabled = false; ai.textContent = '🎨 다시 시도'; alert(err.message); } }
       if (rc) { const ok = await baCopyRich(val(rc.dataset.k, 'body'), rc.dataset.k); toast(ok ? '서식째 복사했습니다. 글쓰기 본문에 붙여넣으세요' : '이 브라우저는 서식 복사가 안 돼 글만 복사했습니다'); }
       if (c) { try { await navigator.clipboard.writeText(val(c.dataset.k, c.dataset.copy)); toast('복사했습니다'); } catch { prompt('복사해서 쓰세요', val(c.dataset.k, c.dataset.copy)); } }
       if (w) {
