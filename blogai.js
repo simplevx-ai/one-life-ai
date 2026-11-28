@@ -104,17 +104,16 @@ async function baLongCall(action, extra, ms = 360000) {
   } finally { clearTimeout(timer); }
 }
 function baAutoUI(box, cfg, getKw) {
-  const st = { n: 6, min: 1500, mode: 'draft' };
+  const st = { n: 6, min: 1500, mode: cfg.autoMode === 'draft' ? 'draft' : 'publish' }; // 기본: 바로 공개(2026-11-28 사용자 지정)
   box.innerHTML = `<div class="muted" style="font-size:13px">사진 없이 <b>주제(대표 키워드)만</b> 넣으면 클라우드플레어 AI가 글(최소 1,500자)과 그림(5~10장, 'AI 생성 이미지' 표시)을 만들어 <b>구글 블로그</b>에 올립니다. 1~4분 걸립니다. 그림은 구글 드라이브 'ONE LIFE 블로그 그림' 폴더에 저장됩니다.</div>
     <div class="grid2" style="margin-top:6px"><div><label>그림 수</label><select id="auN">${[5, 6, 7, 8, 9, 10].map((n) => `<option${n === 6 ? ' selected' : ''}>${n}</option>`).join('')}</select></div><div><label>최소 글자 수</label><input id="auMin" type="number" inputmode="numeric" value="1500" min="1500" step="100"></div></div>
-    <label>올리는 방식</label><div class="chips" id="auMode"><button class="chip on" data-m="draft">📝 임시저장(확인 후 공개)</button><button class="chip" data-m="publish">🚀 바로 공개</button></div>
+    <label>올리는 방식</label><div class="chips" id="auMode"><button class="chip${st.mode === 'publish' ? ' on' : ''}" data-m="publish">🚀 바로 공개</button><button class="chip${st.mode === 'draft' ? ' on' : ''}" data-m="draft">📝 임시저장(확인 후 공개)</button></div>
     <button class="btn primary block" id="auGo" type="button" style="margin-top:8px;font-size:17px;padding:12px">⚡ 자동으로 글·그림 만들고 올리기</button><div id="auOut"></div>`;
-  box.querySelector('#auMode').onclick = (e) => { const b = e.target.closest('[data-m]'); if (!b) return; st.mode = b.dataset.m; box.querySelectorAll('#auMode .chip').forEach((x) => x.classList.toggle('on', x === b)); };
+  box.querySelector('#auMode').onclick = (e) => { const b = e.target.closest('[data-m]'); if (!b) return; st.mode = b.dataset.m; box.querySelectorAll('#auMode .chip').forEach((x) => x.classList.toggle('on', x === b)); getSetting('blogAuto', {}).then((c) => setSetting('blogAuto', { ...c, autoMode: st.mode })); };
   box.querySelector('#auGo').onclick = async () => {
     const topic = getKw(), out = box.querySelector('#auOut'), btn = box.querySelector('#auGo');
     if (!topic) { toast('① 칸의 대표 키워드에 글 주제를 넣으세요'); return; }
     if (!cfg.bloggerId) { alert('⚙️ 기본 정보에 구글 블로그 ID를 먼저 넣어 주세요.'); return; }
-    if (st.mode === 'publish' && !confirm(`"${topic}" 글을 AI로 만들어 구글 블로그에 바로 공개합니다. 진행할까요?`)) return;
     btn.disabled = true; const t0 = Date.now();
     const tick = setInterval(() => { out.innerHTML = `<div class="muted" style="margin-top:6px">⏳ 만드는 중… ${Math.round((Date.now() - t0) / 1000)}초 (글 → 그림 ${box.querySelector('#auN').value}장 → 구글 블로그)</div>`; }, 1000);
     try {
