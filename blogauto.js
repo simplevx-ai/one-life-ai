@@ -118,10 +118,18 @@ async function viewBlogAuto() {
   const urls = photos.map((p) => URL.createObjectURL(p.blob));
   const needSet = !cfg.type;
   view().innerHTML = `
+    <style>
+      #baKind .chip, #baCh .chip, #plPer .chip, #plList .chip, #bcTone .chip, #auMode .chip { border-width: 2px; }
+      #baCh .chip.on, #plPer .chip.on, #plList .chip.on, #bcTone .chip.on, #auMode .chip.on { background: #FFC83D !important; color: #1A1300 !important; border-color: #C98A00 !important; font-weight: 800; box-shadow: 0 2px 8px rgba(201,138,0,.35); }
+      #baKind .chip.on[data-k="case"] { background: #2F9E44 !important; border-color: #2B8A3E !important; color: #fff !important; font-weight: 800; box-shadow: 0 2px 8px rgba(47,158,68,.4); }
+      #baKind .chip.on[data-k="info"] { background: #1C7ED6 !important; border-color: #1864AB !important; color: #fff !important; font-weight: 800; box-shadow: 0 2px 8px rgba(28,126,214,.4); }
+      #baKind .chip.on::before, #baCh .chip.on::before, #plPer .chip.on::before, #plList .chip.on::before, #bcTone .chip.on::before, #auMode .chip.on::before { content: '✓ '; }
+    </style>
     <details class="card" id="baPlanCard"${sessionStorage.getItem('baPlanOpen') ? ' open' : ''}><summary><b>📅 오늘 발행 (편수·방식 고르기)</b></summary><div id="baPlan" style="margin-top:6px"></div></details>
     ${needSet ? '<div class="card warnbox">먼저 아래 ⚙️ 기본 정보(업종·지역)를 넣고 저장하세요. 어떤 업종이든 이 칸만 바꾸면 됩니다.</div>' : ''}
     <div class="card"><label style="margin-top:0">글 종류</label><div class="chips" id="baKind">${[['case', '🛠 시공 후기(실제 사진)'], ['info', '📈 정보·조회수형(애드센스·애드포스트)']].map(([k, n]) => `<button class="chip${(cur?.kind || cfg.kind || 'case') === k ? ' on' : ''}" data-k="${k}">${n}</button>`).join('')}</div>
       <div class="muted" style="font-size:12px">정보·조회수형은 경험을 지어내지 않는 정보 글 규칙과 광고 정책(클릭 유도 금지 등)이 요청문에 들어갑니다. 시공 블로그와 다른 주제면 블로그(또는 카테고리)를 따로 쓰는 게 좋습니다.</div></div>
+    <div class="card" id="baAutoCard" style="border:2px solid #1C7ED6;${(cur?.kind || cfg.kind) === 'info' ? '' : 'display:none'}"><h2>⚡ 정보형 완전 자동 (사진 없이 → 구글 블로그)</h2><div id="baAuto"></div></div>
     <div class="card"><h2>① 사진 넣기</h2>
       <div class="muted" style="font-size:13px">찍은 순서대로 넣으세요(=[사진1], [사진2] …). 사진만 넣어도 됩니다.</div>
       <input id="baFiles" type="file" accept="image/*" multiple style="margin-top:6px">
@@ -169,7 +177,8 @@ async function viewBlogAuto() {
     await setSetting('blogDrafts', [d, ...list.filter((x) => x.id !== id)].slice(0, 30));
     sessionStorage.setItem('baCur', id); return d;
   };
-  $('#baKind').onclick = async (e) => { const b = e.target.closest('[data-k]'); if (!b) return; $('#baKind').querySelectorAll('.chip').forEach((x) => x.classList.toggle('on', x === b)); pv(); if (cur) await saveDraft(); };
+  $('#baKind').onclick = async (e) => { const b = e.target.closest('[data-k]'); if (!b) return; $('#baKind').querySelectorAll('.chip').forEach((x) => x.classList.toggle('on', x === b)); $('#baAutoCard').style.display = b.dataset.k === 'info' ? '' : 'none'; await setSetting('blogAuto', { ...cfg, kind: b.dataset.k }); pv(); if (cur) await saveDraft(); };
+  baAutoUI($('#baAuto'), cfg, () => $('#baKw').value.trim());
   $('#baCh').onclick = (e) => { const b = e.target.closest('[data-k]'); if (!b) return; b.classList.toggle('on'); pv(); };
   ['baMemo', 'baKw', 'baReg'].forEach((id) => $('#' + id).addEventListener('input', pv));
   $('#bcTone').onclick = (e) => { const b = e.target.closest('[data-t]'); if (!b) return; $('#bcTone').querySelectorAll('.chip').forEach((x) => x.classList.toggle('on', x === b)); };

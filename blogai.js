@@ -86,3 +86,42 @@ ${chans.map(([k]) => one(k)).join('\n\n')}
 
 각 구분선 다음 줄은 '제목: …'으로 시작하고, 그다음 줄부터 본문입니다. 설명이나 인사말은 쓰지 마세요.`;
 }
+
+/* ⚡ 정보형 완전 자동: 주제만 넣으면 구글 스크립트가 클라우드플레어 AI로 글(1,500자 이상)·그림(5~10장)을 만들어 구글 블로그에 올린다.
+ * 글·그림 만들기에 1~4분 걸려서 시트 연결을 6분까지 기다린다(보통 연결은 40초). */
+async function baLongCall(action, extra, ms = 360000) {
+  const cfg = await getSetting('sheet', {});
+  if (!cfg.url || !cfg.key) throw new Error('설정에서 시트 웹 앱 주소와 비밀 키를 먼저 넣어 주세요');
+  const ac = new AbortController(), timer = setTimeout(() => ac.abort(), ms);
+  try {
+    const r = await fetch(cfg.url, { method: 'POST', body: JSON.stringify({ key: cfg.key, kind: '연결 테스트', action, ...extra }), signal: ac.signal });
+    const t = await r.text();
+    if (!t.trim().startsWith('{')) throw new Error(/Authorization needed/i.test(t) ? '구글 스크립트 권한 허용이 필요합니다(편집기에서 setupBlogAuto 실행 → 허용)' : '시트 응답을 읽지 못했습니다');
+    const d = JSON.parse(t); if (!d.ok) throw new Error(d.error || '실패'); return d;
+  } catch (e) {
+    if (e.name === 'AbortError') throw new Error('6분이 지나도 끝나지 않았습니다. 잠시 뒤 발행 현황(시트 발행대기)을 확인하세요 — 서버에서는 계속 만들고 있을 수 있습니다');
+    throw e;
+  } finally { clearTimeout(timer); }
+}
+function baAutoUI(box, cfg, getKw) {
+  const st = { n: 6, min: 1500, mode: 'draft' };
+  box.innerHTML = `<div class="muted" style="font-size:13px">사진 없이 <b>주제(대표 키워드)만</b> 넣으면 클라우드플레어 AI가 글(최소 1,500자)과 그림(5~10장, 'AI 생성 이미지' 표시)을 만들어 <b>구글 블로그</b>에 올립니다. 1~4분 걸립니다. 그림은 구글 드라이브 'ONE LIFE 블로그 그림' 폴더에 저장됩니다.</div>
+    <div class="grid2" style="margin-top:6px"><div><label>그림 수</label><select id="auN">${[5, 6, 7, 8, 9, 10].map((n) => `<option${n === 6 ? ' selected' : ''}>${n}</option>`).join('')}</select></div><div><label>최소 글자 수</label><input id="auMin" type="number" inputmode="numeric" value="1500" min="1500" step="100"></div></div>
+    <label>올리는 방식</label><div class="chips" id="auMode"><button class="chip on" data-m="draft">📝 임시저장(확인 후 공개)</button><button class="chip" data-m="publish">🚀 바로 공개</button></div>
+    <button class="btn primary block" id="auGo" type="button" style="margin-top:8px;font-size:17px;padding:12px">⚡ 자동으로 글·그림 만들고 올리기</button><div id="auOut"></div>`;
+  box.querySelector('#auMode').onclick = (e) => { const b = e.target.closest('[data-m]'); if (!b) return; st.mode = b.dataset.m; box.querySelectorAll('#auMode .chip').forEach((x) => x.classList.toggle('on', x === b)); };
+  box.querySelector('#auGo').onclick = async () => {
+    const topic = getKw(), out = box.querySelector('#auOut'), btn = box.querySelector('#auGo');
+    if (!topic) { toast('① 칸의 대표 키워드에 글 주제를 넣으세요'); return; }
+    if (!cfg.bloggerId) { alert('⚙️ 기본 정보에 구글 블로그 ID를 먼저 넣어 주세요.'); return; }
+    if (st.mode === 'publish' && !confirm(`"${topic}" 글을 AI로 만들어 구글 블로그에 바로 공개합니다. 진행할까요?`)) return;
+    btn.disabled = true; const t0 = Date.now();
+    const tick = setInterval(() => { out.innerHTML = `<div class="muted" style="margin-top:6px">⏳ 만드는 중… ${Math.round((Date.now() - t0) / 1000)}초 (글 → 그림 ${box.querySelector('#auN').value}장 → 구글 블로그)</div>`; }, 1000);
+    try {
+      const d = await baLongCall('autoInfoPost', { topic, blogId: cfg.bloggerId, blogTopic: cfg.infoTopic, contact: cfg.contact, photos: +box.querySelector('#auN').value, min: Math.max(1500, +box.querySelector('#auMin').value || 1500), mode: st.mode });
+      clearInterval(tick);
+      out.innerHTML = `<div class="okbox" style="font-weight:400;margin-top:8px">✅ ${d.publish ? '공개 발행' : '임시저장'} 완료 (${d.secs}초)<br><b>${esc(d.title)}</b><br>본문 ${d.chars.toLocaleString()}자(공백 빼고) · 그림 ${d.images}/${d.wanted}장${d.images < d.wanted ? ' (일부 그림 실패)' : ''}<br><a href="${esc(d.url)}" target="_blank" rel="noopener">${d.publish ? '글 보기' : 'Blogger에서 확인·공개하기'}</a></div>`;
+    } catch (e) { clearInterval(tick); out.innerHTML = `<div class="errbox" style="margin-top:6px">${esc(e.message)}</div>`; }
+    finally { btn.disabled = false; }
+  };
+}
