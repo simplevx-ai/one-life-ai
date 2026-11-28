@@ -3,7 +3,7 @@
  */
 'use strict';
 
-const APP_VERSION = '0.13.4';
+const APP_VERSION = '0.14.0';
 const STATUSES = ['접수', '견적', '예약', '완료', '취소'];
 const METHODS = ['계좌이체', '현금', '카드', '기타'];
 const PHOTO_KINDS = ['시공 전', '시공 후', '기타', '고객 사진'];
@@ -90,6 +90,10 @@ const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 
 const esc = (v) => String(v ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const won = (n) => (Number(n) || 0).toLocaleString('ko-KR') + '원';
 const digits = (s) => String(s || '').replace(/\D/g, '');
+// 날짜·진동 도우미(예전 운동노트 sport.js에 있던 것 — 현장노트 biz.js가 같이 씀)
+function weekStart(d = new Date()) { const x = new Date(d); x.setDate(x.getDate() - ((x.getDay() + 6) % 7)); return nowISO(x).slice(0, 10); }
+function addD(iso, n) { const d = new Date(iso + 'T00:00'); d.setDate(d.getDate() + n); return nowISO(d).slice(0, 10); }
+function buzz(p) { try { navigator.vibrate && navigator.vibrate(p); } catch { /* 무시 */ } }
 function prettyPhone(s) {
   const d = digits(s);
   if (d.length === 11) return `${d.slice(0, 3)}-${d.slice(3, 7)}-${d.slice(7)}`;
@@ -124,7 +128,7 @@ function setTitle(t, back) {
 }
 const opts = (arr, sel) => arr.map((v) => `<option${v === sel ? ' selected' : ''}>${esc(v)}</option>`).join('');
 function paidOf(jobId, pays) { return pays.filter((p) => p.jobId === jobId).reduce((a, p) => a + (Number(p.amount) || 0), 0); }
-const nameOf = (c) => (c && c.name) || (c && c.phone ? `이름 미확인(${digits(c.phone).slice(-4)})` : '이름 미확인');
+const nameOf = (c) => (c && (c.name || c.company)) || (c && c.phone ? `이름 미확인(${digits(c.phone).slice(-4)})` : '이름 미확인');
 
 /* ───────── 라우터 ───────── */
 const routes = [
@@ -180,26 +184,9 @@ const routes = [
   [/^#\/voice$/, 'home', viewVoiceList],
   [/^#\/voice\/new$/, 'home', viewVoiceNew],
   [/^#\/voice\/([\w-]+)$/, 'home', (m) => viewVoice(m[1])],
-  // 운동노트 (sport.js)
-  [/^#\/sport$/, 'home', viewSport],
-  [/^#\/run\/new$/, 'home', () => viewRun(null)],
-  [/^#\/run\/([\w-]+)$/, 'home', (m) => viewRun(m[1])],
-  [/^#\/runs$/, 'home', viewRuns],
-  [/^#\/pace$/, 'home', viewPace],
-  [/^#\/shoes$/, 'home', viewShoes],
-  [/^#\/shoe\/new$/, 'home', () => viewShoe(null)],
-  [/^#\/shoe\/([\w-]+)$/, 'home', (m) => viewShoe(m[1])],
-  [/^#\/races$/, 'home', viewRaces],
-  [/^#\/race\/new$/, 'home', () => viewRace(null)],
-  [/^#\/race\/([\w-]+)$/, 'home', (m) => viewRace(m[1])],
-  [/^#\/tables$/, 'home', viewTables],
-  [/^#\/table\/([\w-]+)$/, 'home', (m) => viewTable(m[1])],
-  [/^#\/tablerun\/([\w-]+)$/, 'home', (m) => viewTableRun(m[1])],
-  [/^#\/dives$/, 'home', viewDives],
-  [/^#\/dive\/new$/, 'home', () => viewDive(null)],
-  [/^#\/dive\/([\w-]+)$/, 'home', (m) => viewDive(m[1])],
-  [/^#\/sportcal$/, 'home', viewSportCal],
-  [/^#\/sportset$/, 'home', viewSportSet],
+  // 연락처·단체 문자 (contacts.js), 블로그 자동 작성 (blogauto.js)
+  [/^#\/contacts$/, 'home', viewContacts],
+  [/^#\/blogauto$/, 'home', viewBlogAuto],
   // 마케팅 (mkt.js)
   [/^#\/mkt$/, 'home', viewMkt],
   [/^#\/mktnew$/, 'home', viewMktNew],
@@ -282,8 +269,6 @@ async function viewHome() {
     DB.all('jobs'), DB.all('payments'), DB.all('customers'), DB.all('tasks'), DB.all('notes'), DB.all('office'), DB.all('schedules'),
     getSetting('lastBackup', null), getSetting('sheet', {}), getSetting('lastSync', null)]);
   const oa = officeAlerts(offRecs, scheds);
-  const spItems = await DB.all('sport');
-  const spAl = sportAlerts(spItems, await spCfg());
   const sheetOn = !!(sheetCfg && sheetCfg.url && sheetCfg.key);
   const cmap = Object.fromEntries(custs.map((c) => [c.id, c]));
   const now = new Date();
@@ -310,7 +295,7 @@ async function viewHome() {
   const contacts = contactList(jobs, custs);
   const bizAl = [...(tmrJobs.length ? [{ lv: 'info', icon: '🔔', text: `내일 작업 ${tmrJobs.length}건: ${tmrJobs.map((j) => `${(j.scheduledAt || '').slice(11, 16)} ${nameOf(cmap[j.customerId])}`).join(', ')}`, href: '#/biz' }] : []),
     ...(contacts.length ? [{ lv: 'info', icon: '☎️', text: `연락할 고객 ${contacts.length}명 (${contacts.slice(0, 2).map((x) => nameOf(x.c)).join(', ')}${contacts.length > 2 ? ' 외' : ''})`, href: '#/biz' }] : [])];
-  const alerts = [...buildAlerts({ jobs, pays, tasks, cmap, today, needBackup, daysSinceBackup, oa }), ...bizAl, ...spAl.map((a) => ({ lv: 'info', ...a }))];
+  const alerts = [...buildAlerts({ jobs, pays, tasks, cmap, today, needBackup, daysSinceBackup, oa }), ...bizAl];
   const brief = buildBriefing({ todayJobs, waiting, overdue, monthSales, unpaid, openTasks, notesToday, oa });
   // 구글 캘린더(동기화 때 받아 둔 것): 오늘·앞으로 7일
   const gevs = await gcalEvents();
@@ -396,7 +381,8 @@ async function viewHome() {
         <a class="tile" href="#/ai"><i>🤖</i>AI 비서</a>
         <a class="tile" href="#/reports"><i>📸</i>현장 보고서</a>
         <a class="tile" href="#/mkt"><i>📣</i>마케팅</a>
-        <a class="tile" href="#/sport"><i>🏃</i>운동노트<br><small>러닝·다이빙</small></a>
+        <a class="tile" href="#/contacts"><i>📇</i>연락처·단체 문자</a>
+        <a class="tile" href="#/blogauto"><i>✍️</i>블로그 자동 작성</a>
       </div>
     </div>
     <div class="muted" style="text-align:center">v${APP_VERSION} · 데이터는 이 폰에 저장${sheetOn ? ' · 구글 시트 동기화 켜짐' : ''}</div>`;
@@ -433,7 +419,7 @@ async function viewHome() {
 }
 
 /* ───────── 빠른 기록(음성·텍스트·사진) ───────── */
-const NOTE_TAGS = ['사업', '관리사무소', '개인', '아이디어', '마라톤', '프리다이빙', '투자'];
+const NOTE_TAGS = ['사업', '관리사무소', '개인', '아이디어', '투자'];
 
 async function viewNotes() {
   setTitle('빠른 기록', true);
@@ -907,7 +893,7 @@ async function viewCustomers() {
   const [custs, jobs, pays] = await Promise.all([DB.all('customers'), DB.all('jobs'), DB.all('payments')]);
   let q = '';
   function draw() {
-    const list = custs.filter((c) => !q || [c.name, c.phone, c.area].join(' ').toLowerCase().includes(q))
+    const list = custs.filter((c) => !q || [c.name, c.company, c.phone, c.area, c.address].join(' ').toLowerCase().includes(q))
       .sort((a, b) => (b.updatedAt || '').localeCompare(a.updatedAt || ''));
     $('#custList').innerHTML = list.length ? list.map((c) => {
       const js = jobs.filter((j) => j.customerId === c.id);
@@ -916,7 +902,7 @@ async function viewCustomers() {
         <div class="muted">${esc([prettyPhone(c.phone), c.area].filter(Boolean).join(' · '))}</div></a>`;
     }).join('') : '<div class="empty">고객이 없습니다. 작업을 저장하면 자동으로 생깁니다.</div>';
   }
-  view().innerHTML = `<input id="q" type="search" placeholder="이름·전화·지역 검색" style="margin-bottom:10px"><div id="custList"></div>`;
+  view().innerHTML = `<input id="q" type="search" placeholder="이름·업체명·전화·지역 검색" style="margin-bottom:10px"><a class="btn block" href="#/contacts" style="margin-bottom:10px">📇 연락처 가져오기·업체 찾기·단체 문자</a><div id="custList"></div>`;
   $('#q').oninput = (e) => { q = e.target.value.trim().toLowerCase(); draw(); };
   draw();
   fab('#/job/new');

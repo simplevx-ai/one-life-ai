@@ -475,12 +475,16 @@ async function viewCustomer(id) {
       <div class="grid2" style="margin-top:8px"><div><div class="muted">누적 결제</div><b>${won(total)}</b></div><div><div class="muted">미수금</div><b style="color:${unpaid ? 'var(--red)' : 'inherit'}">${won(unpaid)}</b></div></div>
       <div class="row wrap" style="margin-top:8px">${contactBtns(c)}${mapLinks([c.area, c.address].filter(Boolean).join(' '))}<a class="btn small primary" href="#/job/new?c=${c.id}">+ 새 작업</a></div></div>
     <div class="card"><div class="grid2"><div><label for="c_next">다음 연락일</label><input id="c_next" type="date" value="${esc(c.nextContact)}"></div><div><label for="c_cm">연락 이유</label><input id="c_cm" value="${esc(c.contactMemo)}" placeholder="예: 봄 방충망 점검"></div></div>
+      <div class="grid2" style="margin-top:8px"><div><label for="c_nm">이름</label><input id="c_nm" value="${esc(c.name)}"></div><div><label for="c_co">업체명</label><input id="c_co" value="${esc(c.company)}"></div>
+        <div><label for="c_ph">전화</label><input id="c_ph" type="tel" value="${esc(prettyPhone(c.phone))}"></div><div><label for="c_gr">묶음</label><input id="c_gr" value="${esc(c.group)}" placeholder="고객·거래처 등"></div></div>
+      <label for="c_ad">주소</label><input id="c_ad" value="${esc(c.address)}">
+      <label for="c_ca">업종</label><input id="c_ca" value="${esc(c.category)}">
       <label for="c_memo">고객 메모</label><textarea id="c_memo" rows="2">${esc(c.memo)}</textarea>
       <button class="btn block" id="c_save" type="button" style="margin-top:8px">💾 저장</button></div>
     ${ph.length ? `<div class="card"><h2>사진</h2><div class="photos">${ph.map((p, i) => `<div class="photo"><img src="${urls[i]}" alt=""><span>${esc(p.kind || '')}</span></div>`).join('')}</div></div>` : ''}
     <div class="card"><h2>작업 이력</h2>${ev.map((x) => `<div style="border-left:3px solid var(--blue);padding:4px 0 10px 10px;margin-left:4px"><div class="muted" style="font-size:12px">${esc(x.d)}</div>${x.html}</div>`).join('') || '<div class="muted">없음</div>'}</div>
     <button class="btn danger block" id="delCust" type="button">고객 삭제</button>`;
-  $('#c_save').onclick = async () => { await DB.put('customers', { ...c, nextContact: $('#c_next').value, contactMemo: $('#c_cm').value.trim(), memo: $('#c_memo').value.trim(), updatedAt: nowISO() }); toast('저장했습니다'); };
+  $('#c_save').onclick = async () => { await DB.put('customers', { ...c, name: $('#c_nm').value.trim(), company: $('#c_co').value.trim(), phone: digits($('#c_ph').value), group: $('#c_gr').value.trim(), address: $('#c_ad').value.trim(), category: $('#c_ca').value.trim(), nextContact: $('#c_next').value, contactMemo: $('#c_cm').value.trim(), memo: $('#c_memo').value.trim(), updatedAt: nowISO() }); toast('저장했습니다'); };
   $('#delCust').onclick = async () => {
     if (jobs.length) { toast('작업이 남아 있어 지울 수 없습니다. 작업을 먼저 지우세요.'); return; }
     if (confirm('이 고객을 지울까요?')) { await DB.del('customers', id); location.replace('#/customers'); }
