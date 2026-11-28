@@ -115,6 +115,7 @@ async function viewBlogAuto() {
   const urls = photos.map((p) => URL.createObjectURL(p.blob));
   const needSet = !cfg.type;
   view().innerHTML = `
+    <details class="card" id="baPlanCard"${sessionStorage.getItem('baPlanOpen') ? ' open' : ''}><summary><b>📅 오늘 발행 (편수·방식 고르기)</b></summary><div id="baPlan" style="margin-top:6px"></div></details>
     ${needSet ? '<div class="card warnbox">먼저 아래 ⚙️ 기본 정보(업종·지역)를 넣고 저장하세요. 어떤 업종이든 이 칸만 바꾸면 됩니다.</div>' : ''}
     <div class="card"><h2>① 사진 넣기</h2>
       <div class="muted" style="font-size:13px">찍은 순서대로 넣으세요(=[사진1], [사진2] …). 사진만 넣어도 됩니다.</div>
@@ -216,6 +217,9 @@ async function viewBlogAuto() {
   }
   // 🔐 계정 메모
   baVaultUI($('#baVault'));
+  // 📅 오늘 발행
+  $('#baPlanCard').addEventListener('toggle', (e) => { if (e.target.open) { sessionStorage.setItem('baPlanOpen', '1'); baPlanUI($('#baPlan'), cfg); } else sessionStorage.removeItem('baPlanOpen'); });
+  if ($('#baPlanCard').open) baPlanUI($('#baPlan'), cfg);
   $('#baGo').onclick = async () => {
     if (!cfg.type) { toast('⚙️ 기본 정보에 업종을 먼저 넣으세요'); return; }
     if (!chans().length) { toast('올릴 곳을 하나 이상 고르세요'); return; }
