@@ -3,7 +3,7 @@
  */
 'use strict';
 
-const APP_VERSION = '0.14.0';
+const APP_VERSION = '0.14.1';
 const STATUSES = ['접수', '견적', '예약', '완료', '취소'];
 const METHODS = ['계좌이체', '현금', '카드', '기타'];
 const PHOTO_KINDS = ['시공 전', '시공 후', '기타', '고객 사진'];

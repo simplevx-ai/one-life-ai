@@ -19,16 +19,20 @@ function baPrompt(cfg, d) {
     naver: `===네이버===
 - 1,500~2,500자. 소제목 3~5개(짧은 문장형). 사진 자리 [사진1]~[사진${d.n}]을 모두 쓰고, 사진마다 바로 아래 1~2문장으로 사진에 실제로 보이는 것만 설명.
 - 제목: 맨 앞에 대표 키워드 → 지역 → 구체 상황(무엇을·왜). 25~35자. 과장(최고·완벽·무조건) 금지.
-- 첫 3줄 안에 대표 키워드를 한 번, 본문 전체에 2~5번만(억지로 반복하지 않기).
-- 흐름: 이런 문제로 연락받음 → 현장에서 본 것 → 이렇게 해결함(순서대로, 왜 그렇게 했는지) → 끝난 모습 → 비슷한 상황인 분께 한마디 → 문의 안내 1번.
-- 마지막 줄에 '태그:' 뒤에 # 태그 8~12개.`,
+- 첫 2~3줄은 검색 결과 미리보기에 보일 수 있으니, 무엇을 어떻게 해결했는지 한눈에 알 수 있게 쓰고 그 안에 대표 키워드를 한 번. 본문 전체에는 2~5번만(억지로 반복하지 않기).
+- 흐름: 이런 문제로 연락받음 → 현장에서 본 것 → 이렇게 해결함(순서대로, 왜 그렇게 했는지) → 끝난 모습 → 비슷한 상황인 분께 한마디 → [관련 글] 자리 → 문의 안내 1번.
+- 마지막 줄에 '태그:' 뒤에 # 태그 8~12개(대표 키워드 1개 + 세부·지역·질문형 키워드).`,
     tistory: `===티스토리===
 - 구글 검색용 정보형 글. 2,000~3,000자. 첫 문단 2~3줄에 결론(무엇이 문제였고 어떻게 해결했는지).
 - 소제목은 '## '로 4~6개. 비교나 정리가 필요한 곳에 표 1개(마크다운 표). 끝에 자주 묻는 질문 3개(Q/A).
-- 사진 자리 [사진n]은 필요한 곳에만 4~8개. 마지막 줄 '태그:' 뒤에 쉼표로 5~8개.`,
+- 사진 자리 [사진n]은 필요한 곳에만 4~8개.
+- 제목 바로 다음 줄에 '검색 설명: …'(대표 키워드가 들어간 120자 이내, 무엇을 알 수 있는지), 그다음 줄에 '주소: …'(영문 소문자·숫자·하이픈 3~6단어, 예: window-screen-replacement-suseong).
+- 마지막 줄 '태그:' 뒤에 쉼표로 5~8개.`,
     blogger: `===구글===
 - 티스토리와 같은 정보형이지만 1,500~2,500자로 짧게, 내용은 겹치지 않게 다른 각도(예: 고르는 법·주의할 점 중심)로.
-- 소제목은 '## '로 3~5개. 사진 자리 [사진n] 3~6개. 마지막 줄 '태그:' 뒤에 쉼표로 5개 안팎.`,
+- 소제목은 '## '로 3~5개. 사진 자리 [사진n] 3~6개.
+- 제목 바로 다음 줄에 '검색 설명: …'(120자 이내), 그다음 줄에 '주소: …'(영문 슬러그).
+- 마지막 줄 '태그:' 뒤에 쉼표로 5개 안팎.`,
   }[k]);
   return `당신은 [${cfg.type || '업종'}] 일을 직접 하는 사장님의 블로그 글을 대신 써 주는 사람입니다. 네이버 블로그 상위노출 구조를 알지만, 글은 광고 문구가 아니라 현장에서 일한 사람이 쓴 일지처럼 써야 합니다.
 
@@ -50,6 +54,14 @@ ${cfg.contact ? `- 문의 안내 문구: ${cfg.contact}\n` : ''}${cfg.avoid ? `-
 6. 고객 이름·전화·동·호수·차량 번호 등 개인정보는 쓰지 않습니다(사진에 보여도).
 7. 업종이 달라도 같은 원칙: 문제 → 원인 → 해결 과정 → 결과 → 비슷한 분께 조언.
 
+[검색에 유리하게 — 내용이 먼저, 형식은 그다음]
+8. 독자의 고민을 해결하는 글: 이 글을 읽은 사람이 '그래서 나는 뭘 하면 되는지'를 알 수 있게 씁니다(점검 순서·고르는 기준·주의할 점 중 하나 이상).
+9. 비슷한 글보다 한 가지는 더 구체적으로: 현장에서 일한 사람만 아는 디테일(왜 이 자재·방법을 골랐는지, 하기 전에 확인할 것, 흔한 실수)을 1개 이상 넣습니다. 단, 사진·메모에 근거가 없는 수치는 쓰지 않습니다.
+10. 시각 자료: 비교·순서·체크가 있는 곳에 표나 체크리스트 1개, 전후 비교는 [사진n] 두 장을 나란히 이어서.
+11. 모바일에서 읽기 쉽게: 한 문단 2~4줄, 소제목 사이 문단 2~3개.
+12. 키워드는 넓은 말 대신 구체적인 말로: '방충망'보다 '[지역] [작업] [상황]'처럼 고객이 실제로 검색할 문장에 가깝게.
+13. 관련 글 연결: 문의 안내 바로 앞에 '[관련 글: 주제]'를 1~2개 넣습니다(사장님이 내 블로그 이전 글 링크로 바꿈). 없는 글 주소를 지어내지 않습니다.
+
 [채널별 형식 — 아래 구분선 그대로, 이 순서로만 답하세요]
 ${chans.map(([k]) => one(k)).join('\n\n')}
 
@@ -68,7 +80,11 @@ function baParse(text) {
     if (tm) { title = tm[1].replace(/\*\*/g, '').trim(); s = s.replace(tm[0], '').trim(); }
     let tags = ''; const gm = s.match(/^\s*(?:\*\*)?태그\s*[:：]\s*(.+)$/m);
     if (gm) { tags = gm[1].replace(/\*\*/g, '').trim(); s = s.replace(gm[0], '').trim(); }
-    out[mk.k] = { title, body: s.replace(/^본문\s*[:：]\s*/m, ''), tags };
+    let desc = ''; const dm = s.match(/^\s*(?:\*\*)?검색\s*설명\s*[:：]\s*(.+)$/m);
+    if (dm) { desc = dm[1].replace(/\*\*/g, '').trim(); s = s.replace(dm[0], '').trim(); }
+    let slug = ''; const um = s.match(/^\s*(?:\*\*)?주소\s*[:：]\s*(.+)$/m);
+    if (um) { slug = um[1].replace(/\*\*|`/g, '').trim().toLowerCase().replace(/[^a-z0-9-]+/g, '-').replace(/^-+|-+$/g, ''); s = s.replace(um[0], '').trim(); }
+    out[mk.k] = { title, body: s.replace(/^본문\s*[:：]\s*/m, ''), tags, desc, slug };
   });
   return out;
 }
@@ -176,6 +192,9 @@ async function viewBlogAuto() {
       return `<div class="card"><h2>${n}</h2><label>제목</label><input data-f="title" data-k="${k}" value="${esc(x.title)}">
         <label>본문 <span class="muted">(${x.body.length.toLocaleString()}자 · 사진 자리 ${(x.body.match(/\[사진\s*\d+\]/g) || []).length}개)</span></label><textarea data-f="body" data-k="${k}" rows="8">${esc(x.body)}</textarea>
         <label>태그</label><input data-f="tags" data-k="${k}" value="${esc(x.tags)}">
+        ${k !== 'naver' ? `<label>검색 설명 <span class="muted">(${(x.desc || '').length}/120자 · 티스토리 '글 설명'·Blogger '검색 설명' 칸)</span></label><input data-f="desc" data-k="${k}" value="${esc(x.desc || '')}">
+        <label>주소(영문) <span class="muted">(티스토리 'URL 설정'·Blogger '맞춤 링크' 칸)</span></label><input data-f="slug" data-k="${k}" value="${esc(x.slug || '')}">
+        <div class="grid2" style="margin-top:6px"><button class="btn small" data-copy="desc" data-k="${k}" type="button">검색 설명 복사</button><button class="btn small" data-copy="slug" data-k="${k}" type="button">주소 복사</button></div>` : ''}
         <div class="grid2" style="margin-top:8px"><button class="btn" data-copy="title" data-k="${k}" type="button">제목 복사</button><button class="btn" data-copy="body" data-k="${k}" type="button">본문 복사</button>
           <button class="btn" data-copy="tags" data-k="${k}" type="button">태그 복사</button><button class="btn primary" data-write="${k}" type="button">✏️ 글쓰기 화면 열기</button></div>
         ${k === 'blogger' ? `<button class="btn primary block" data-post="${k}" type="button" style="margin-top:6px">🔵 구글 블로그에 임시저장으로 올리기</button><div class="muted" style="font-size:12px">사진은 올라가지 않습니다. Blogger 편집 화면에서 [사진n] 자리에 넣고 '게시'를 눌러 공개하세요.</div>` : ''}
