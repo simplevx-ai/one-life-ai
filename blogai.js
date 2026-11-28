@@ -105,19 +105,62 @@ async function baLongCall(action, extra, ms = 360000) {
 }
 function baAutoUI(box, cfg, getKw) {
   const st = { n: 6, min: 1500, mode: cfg.autoMode === 'draft' ? 'draft' : 'publish' }; // 기본: 바로 공개(2026-11-28 사용자 지정)
+  // 여러 블로그(다른 계정 블로그에 관리자로 초대받아 수락한 것 포함)
+  let blogs = Array.isArray(cfg.blogs) && cfg.blogs.length ? cfg.blogs : (cfg.bloggerId ? [{ id: cfg.bloggerId, name: '기본 블로그', url: '', topic: cfg.infoTopic || '생활 꿀팁', category: '생활꿀팁' }] : []);
+  let selId = cfg.autoBlog && blogs.some((b) => b.id === cfg.autoBlog) ? cfg.autoBlog : (blogs[0] || {}).id || '';
+  const cur = () => blogs.find((b) => b.id === selId) || null;
+  const keep = async () => { const c = await getSetting('blogAuto', {}); await setSetting('blogAuto', { ...c, blogs, autoBlog: selId }); };
   box.innerHTML = `<div class="muted" style="font-size:13px">사진 없이 <b>주제(대표 키워드)만</b> 넣으면 클라우드플레어 AI가 글(최소 1,500자)과 그림(5~10장, 'AI 생성 이미지' 표시)을 만들어 <b>구글 블로그</b>에 올립니다. 1~4분 걸립니다. 그림은 구글 드라이브 'ONE LIFE 블로그 그림' 폴더에 저장됩니다.</div>
+    <label>올릴 블로그</label><div style="display:flex;gap:6px"><select id="auBlog" style="flex:1"></select><button class="btn" id="auLoad" type="button">🔄 불러오기</button></div>
+    <div class="grid2"><div><label>이 블로그 주제</label><input id="auBTopic" placeholder="예: 생활 꿀팁·집 관리"></div><div><label>카테고리(라벨)</label><input id="auBCat" placeholder="예: 생활꿀팁"></div></div>
+    <div class="muted" style="font-size:12px">다른 계정 블로그는 그 블로그 설정 → 권한 → '블로그 관리자 및 작성자' → 초대에 이 계정을 <b>관리자</b>로 넣고, 받은 초대 메일에서 수락한 뒤 🔄 불러오기를 누르세요.</div>
     <div class="grid2" style="margin-top:6px"><div><label>그림 수</label><select id="auN">${[5, 6, 7, 8, 9, 10].map((n) => `<option${n === 6 ? ' selected' : ''}>${n}</option>`).join('')}</select></div><div><label>최소 글자 수</label><input id="auMin" type="number" inputmode="numeric" value="1500" min="1500" step="100"></div></div>
     <label>올리는 방식</label><div class="chips" id="auMode"><button class="chip${st.mode === 'publish' ? ' on' : ''}" data-m="publish">🚀 바로 공개</button><button class="chip${st.mode === 'draft' ? ' on' : ''}" data-m="draft">📝 임시저장(확인 후 공개)</button></div>
-    <button class="btn primary block" id="auGo" type="button" style="margin-top:8px;font-size:17px;padding:12px">⚡ 자동으로 글·그림 만들고 올리기</button><div id="auOut"></div>`;
+    <button class="btn primary block" id="auGo" type="button" style="margin-top:8px;font-size:17px;padding:12px">⚡ 자동으로 글·그림 만들고 올리기</button><div id="auOut"></div>
+    <details style="margin-top:10px"><summary><b>📅 여러 주제 예약 (30분마다 1편씩 바로 공개)</b></summary>
+      <div class="muted" style="font-size:12px;margin-top:4px">한 줄에 주제 하나. 고른 블로그로 예약되고, 블로그가 여럿이면 번갈아 올립니다. 클라우드플레어 하루 무료 한도(오전 9시 초기화)에 걸리면 다음 차례에 이어서 합니다.</div>
+      <textarea id="auQ" rows="5" placeholder="수도 계량기 동파 예방법&#10;가습기 세척 방법"></textarea>
+      <div class="grid2" style="margin-top:6px"><button class="btn primary" id="auQGo" type="button">예약 추가</button><button class="btn" id="auQSt" type="button">진행 현황</button></div>
+      <div id="auQOut"></div></details>`;
+  const fillBlogs = () => {
+    box.querySelector('#auBlog').innerHTML = blogs.length ? blogs.map((b) => `<option value="${esc(b.id)}"${b.id === selId ? ' selected' : ''}>${esc(b.name || b.id)}${b.url ? ' · ' + esc(b.url.replace(/^https?:\/\//, '').replace(/\/$/, '')) : ''}</option>`).join('') : '<option value="">(블로그 없음 — 🔄 불러오기)</option>';
+    const c = cur(); box.querySelector('#auBTopic').value = c ? c.topic || '' : ''; box.querySelector('#auBCat').value = c ? c.category || '' : '';
+  };
+  fillBlogs();
+  box.querySelector('#auBlog').onchange = async (e) => { selId = e.target.value; fillBlogs(); await keep(); };
+  ['#auBTopic', '#auBCat'].forEach((s) => { box.querySelector(s).onchange = async () => { const c = cur(); if (!c) return; c.topic = box.querySelector('#auBTopic').value.trim(); c.category = box.querySelector('#auBCat').value.trim(); await keep(); }; });
+  box.querySelector('#auLoad').onclick = async () => {
+    const b = box.querySelector('#auLoad'); b.disabled = true;
+    try {
+      const d = await callSheet('listBlogs', {}); if (!d.ok) throw new Error(d.error || '실패');
+      const old = Object.fromEntries(blogs.map((x) => [x.id, x]));
+      blogs = (d.blogs || []).map((x) => ({ id: x.id, name: x.name, url: x.url, topic: (old[x.id] || {}).topic || (x.id === cfg.bloggerId ? cfg.infoTopic || '생활 꿀팁' : ''), category: (old[x.id] || {}).category || (x.id === cfg.bloggerId ? '생활꿀팁' : '') }));
+      if (!blogs.some((x) => x.id === selId)) selId = (blogs[0] || {}).id || '';
+      fillBlogs(); await keep(); toast(`블로그 ${blogs.length}개를 불러왔습니다`);
+    } catch (e) { alert('블로그 목록을 못 불러왔습니다: ' + e.message); } finally { b.disabled = false; }
+  };
+  const showQ = (d) => { const names = Object.fromEntries(blogs.map((x) => [x.id, x.name || x.id])); box.querySelector('#auQOut').innerHTML = `<div class="okbox" style="font-weight:400;margin-top:6px">남은 글 ${d.left}편${d.left ? ' (' + Object.entries(d.perBlog || {}).map(([k, v]) => esc(names[k] || k) + ' ' + v).join(', ') + ')' : ''}${d.next ? '<br>다음: ' + esc(d.next) : ''}${d.last ? '<br>최근: ' + esc(d.last) : ''}${(d.done || []).length ? '<br>올린 글: ' + d.done.slice(-5).reverse().map((x) => `<a href="${esc(x.url)}" target="_blank" rel="noopener">${esc(x.title)}</a>`).join(' · ') : ''}</div>`; };
+  box.querySelector('#auQGo').onclick = async () => {
+    const c = cur(), lines = box.querySelector('#auQ').value.split('\n').map((x) => x.trim()).filter(Boolean);
+    if (!c) { alert('올릴 블로그를 먼저 고르세요(🔄 불러오기).'); return; }
+    if (!lines.length) { toast('주제를 한 줄에 하나씩 넣으세요'); return; }
+    try {
+      const d = await callSheet('queueInfoPosts', { append: true, items: lines.map((t) => ({ topic: t, blogId: c.id, blogTopic: c.topic || '생활 꿀팁', category: c.category || '생활꿀팁', photos: 5, min: 1500, contact: cfg.contact })) });
+      if (!d.ok) throw new Error(d.error || '실패');
+      box.querySelector('#auQ').value = ''; toast(`${d.queued}편 예약 · 전체 남은 ${d.left}편`);
+      showQ(await callSheet('infoQueueStatus', {}));
+    } catch (e) { alert('예약 실패: ' + e.message); }
+  };
+  box.querySelector('#auQSt').onclick = async () => { try { showQ(await callSheet('infoQueueStatus', {})); } catch (e) { alert(e.message); } };
   box.querySelector('#auMode').onclick = (e) => { const b = e.target.closest('[data-m]'); if (!b) return; st.mode = b.dataset.m; box.querySelectorAll('#auMode .chip').forEach((x) => x.classList.toggle('on', x === b)); getSetting('blogAuto', {}).then((c) => setSetting('blogAuto', { ...c, autoMode: st.mode })); };
   box.querySelector('#auGo').onclick = async () => {
     const topic = getKw(), out = box.querySelector('#auOut'), btn = box.querySelector('#auGo');
     if (!topic) { toast('① 칸의 대표 키워드에 글 주제를 넣으세요'); return; }
-    if (!cfg.bloggerId) { alert('⚙️ 기본 정보에 구글 블로그 ID를 먼저 넣어 주세요.'); return; }
+    const blog = cur(); if (!blog) { alert('올릴 블로그를 먼저 고르세요(🔄 불러오기 또는 ⚙️ 기본 정보의 구글 블로그 ID).'); return; }
     btn.disabled = true; const t0 = Date.now();
     const tick = setInterval(() => { out.innerHTML = `<div class="muted" style="margin-top:6px">⏳ 만드는 중… ${Math.round((Date.now() - t0) / 1000)}초 (글 → 그림 ${box.querySelector('#auN').value}장 → 구글 블로그)</div>`; }, 1000);
     try {
-      const d = await baLongCall('autoInfoPost', { topic, blogId: cfg.bloggerId, blogTopic: cfg.infoTopic, contact: cfg.contact, photos: +box.querySelector('#auN').value, min: Math.max(1500, +box.querySelector('#auMin').value || 1500), mode: st.mode });
+      const d = await baLongCall('autoInfoPost', { topic, blogId: blog.id, blogTopic: blog.topic || cfg.infoTopic, category: blog.category || '생활꿀팁', contact: cfg.contact, photos: +box.querySelector('#auN').value, min: Math.max(1500, +box.querySelector('#auMin').value || 1500), mode: st.mode });
       clearInterval(tick);
       out.innerHTML = `<div class="okbox" style="font-weight:400;margin-top:8px">✅ ${d.publish ? '공개 발행' : '임시저장'} 완료 (${d.secs}초)<br><b>${esc(d.title)}</b><br>본문 ${d.chars.toLocaleString()}자(공백 빼고) · 그림 ${d.images}/${d.wanted}장${d.images < d.wanted ? ' (일부 그림 실패)' : ''}<br><a href="${esc(d.url)}" target="_blank" rel="noopener">${d.publish ? '글 보기' : 'Blogger에서 확인·공개하기'}</a></div>`;
     } catch (e) { clearInterval(tick); out.innerHTML = `<div class="errbox" style="margin-top:6px">${esc(e.message)}</div>`; }
