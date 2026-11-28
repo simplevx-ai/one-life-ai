@@ -3,7 +3,7 @@
  */
 'use strict';
 
-const APP_VERSION = '0.14.1';
+const APP_VERSION = '0.15.0';
 const STATUSES = ['접수', '견적', '예약', '완료', '취소'];
 const METHODS = ['계좌이체', '현금', '카드', '기타'];
 const PHOTO_KINDS = ['시공 전', '시공 후', '기타', '고객 사진'];
@@ -1209,7 +1209,7 @@ async function exportBackup() {
   for (const p of photos) ph.push({ ...p, blob: undefined, data: await blobToDataURL(p.blob) });
   const nt = [];
   for (const n of notes) nt.push({ ...n, photo: undefined, photoData: n.photo ? await blobToDataURL(n.photo) : '', audio: undefined, audioData: n.audio ? await blobToDataURL(n.audio) : '' });
-  const out = { app: 'ONE LIFE AI', version: APP_VERSION, exportedAt: nowISO(), customers, jobs, payments, settings: settings.filter((s) => s.key !== 'lastBackup'), photos: ph, tasks, notes: nt, office, schedules, invest, mkt, sport, expense };
+  const out = { app: 'ONE LIFE AI', version: APP_VERSION, exportedAt: nowISO(), customers, jobs, payments, settings: settings.filter((s) => s.key !== 'lastBackup' && s.key !== 'vault') /* 계정 메모(암호화)는 백업에서 뺌 */, photos: ph, tasks, notes: nt, office, schedules, invest, mkt, sport, expense };
   const blob = new Blob([JSON.stringify(out)], { type: 'application/json' });
   const name = `onelife-backup-${todayStr()}.json`;
   const file = new File([blob], name, { type: 'application/json' });

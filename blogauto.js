@@ -13,7 +13,7 @@ async function baCfg() {
 }
 
 /* 사람이 쓴 것 같은 글 요청문 — 업종이 무엇이든 [업종]·[지역]만 바뀐다 */
-function baPrompt(cfg, d) {
+function baPrompt(cfg, d, rules) {
   const chans = BA_CH.filter(([k]) => d.chans.includes(k));
   const one = (k) => ({
     naver: `===네이버===
@@ -21,6 +21,8 @@ function baPrompt(cfg, d) {
 - 제목: 맨 앞에 대표 키워드 → 지역 → 구체 상황(무엇을·왜). 25~35자. 과장(최고·완벽·무조건) 금지.
 - 첫 2~3줄은 검색 결과 미리보기에 보일 수 있으니, 무엇을 어떻게 해결했는지 한눈에 알 수 있게 쓰고 그 안에 대표 키워드를 한 번. 본문 전체에는 2~5번만(억지로 반복하지 않기).
 - 흐름: 이런 문제로 연락받음 → 현장에서 본 것 → 이렇게 해결함(순서대로, 왜 그렇게 했는지) → 끝난 모습 → 비슷한 상황인 분께 한마디 → [관련 글] 자리 → 문의 안내 1번.
+- 줄바꿈(모바일 가독성): 한 줄에 한 문장, 2~3문장마다 빈 줄 하나. 소제목은 '## '로 시작.
+- 강조: 소제목 하나에 핵심 문장 1개만 **굵게**. 꼭 알아둘 팁·주의 한두 곳은 줄 맨 앞에 '💡 ' 또는 '⚠️ '를 붙인 한 줄로(앱이 색 상자로 바꿈).
 - 마지막 줄에 '태그:' 뒤에 # 태그 8~12개(대표 키워드 1개 + 세부·지역·질문형 키워드).`,
     tistory: `===티스토리===
 - 구글 검색용 정보형 글. 2,000~3,000자. 첫 문단 2~3줄에 결론(무엇이 문제였고 어떻게 해결했는지).
@@ -62,6 +64,7 @@ ${cfg.contact ? `- 문의 안내 문구: ${cfg.contact}\n` : ''}${cfg.avoid ? `-
 12. 키워드는 넓은 말 대신 구체적인 말로: '방충망'보다 '[지역] [작업] [상황]'처럼 고객이 실제로 검색할 문장에 가깝게.
 13. 관련 글 연결: 문의 안내 바로 앞에 '[관련 글: 주제]'를 1~2개 넣습니다(사장님이 내 블로그 이전 글 링크로 바꿈). 없는 글 주소를 지어내지 않습니다.
 
+${baRuleText(rules, d.chans)}
 [채널별 형식 — 아래 구분선 그대로, 이 순서로만 답하세요]
 ${chans.map(([k]) => one(k)).join('\n\n')}
 
@@ -105,7 +108,7 @@ function baHtml(body) {
 
 async function viewBlogAuto() {
   setTitle('블로그 자동 작성', '#/');
-  const cfg = await baCfg(), mc = await mktCfg();
+  const cfg = await baCfg(), mc = await mktCfg(), rules = await baRules();
   const drafts = await getSetting('blogDrafts', []);
   const cur = drafts.find((x) => x.id === sessionStorage.getItem('baCur')) || null;
   const photos = cur ? (await DB.by('photos', 'jobId', cur.id)).sort((a, b) => (a.order || 0) - (b.order || 0)) : [];
@@ -120,7 +123,8 @@ async function viewBlogAuto() {
       <label for="baMemo">짧은 메모 (선택)</label><textarea id="baMemo" rows="3" placeholder="예: 20년 된 아파트, 방충망 삭아서 교체, 미세방충망으로">${esc(cur?.memo || '')}</textarea>
       <div class="grid2"><div><label for="baKw">대표 키워드 (선택)</label><input id="baKw" value="${esc(cur?.kw || '')}" placeholder="예: 수성구 방충망 교체"></div><div><label for="baReg">지역 (이번 글)</label><input id="baReg" value="${esc(cur?.region || cfg.region)}"></div></div>
       <label>올릴 곳</label><div class="chips" id="baCh">${BA_CH.map(([k, n]) => `<button class="chip${(cur?.chans || cfg.chans).includes(k) ? ' on' : ''}" data-k="${k}">${n}</button>`).join('')}</div>
-      <div class="grid2" style="margin-top:8px"><button class="btn" id="baNew" type="button">🆕 새 글</button><button class="btn" id="baShare" type="button" ${photos.length ? '' : 'disabled'}>📤 사진 보내기</button></div></div>
+      <div class="grid2" style="margin-top:8px"><button class="btn" id="baNew" type="button">🆕 새 글</button><button class="btn" id="baShare" type="button" ${photos.length ? '' : 'disabled'}>📤 사진 보내기</button></div>
+      ${photos.length ? `<button class="btn block" id="baGif" type="button" style="margin-top:6px">🎞 움짤(GIF) 만들기 (사진 ${photos.length}장)</button><div id="baGifOut"></div>` : ''}</div>
     <div class="card"><h2>② 내 Claude로 글 쓰기</h2>
       <div class="muted" style="font-size:13px">요청문을 복사하고 claude.ai를 엽니다. Claude 대화창에 <b>같은 사진을 순서대로 첨부</b>해서 보내세요(📤 사진 보내기로 Claude 앱에 바로 공유 가능). 받은 답 전체를 ③에 붙여넣으면 됩니다.</div>
       <button class="btn primary block" id="baGo" type="button" style="margin-top:8px">🟠 요청문 복사하고 claude.ai 열기</button>
@@ -129,6 +133,8 @@ async function viewBlogAuto() {
       <textarea id="baAns" rows="6" placeholder="===네이버=== 로 시작하는 답 전체">${esc(cur?.answer || '')}</textarea>
       <button class="btn block" id="baParse" type="button" style="margin-top:6px">채널별로 나누기</button></div>
     <div id="baOut"></div>
+    ${cur ? '<div class="card"><h2>📈 발행 기록·조회수</h2><div id="baPub"></div></div>' : ''}
+    <div class="muted" style="font-size:12px;margin:4px 2px">📋 검색 정책 규칙: ${esc(rules ? rules.updated : '불러오지 못함')} 기준${rules && rules.status ? ' · ' + esc(rules.status.slice(0, 40)) : ''} (매주 월요일 검토 후 자동 반영)</div>
     <details class="card"${needSet ? ' open' : ''}><summary><b>⚙️ 기본 정보 (모든 글에 공통)</b></summary>
       <div class="grid2" style="margin-top:6px"><div><label for="bcType">업종 (블로그 주제 1개)</label><input id="bcType" value="${esc(cfg.type)}" placeholder="예: 방충망 시공"></div><div><label for="bcRegion">기본 지역</label><input id="bcRegion" value="${esc(cfg.region)}" placeholder="예: 대구 수성구"></div>
         <div><label for="bcBiz">업체명</label><input id="bcBiz" value="${esc(cfg.biz)}"></div><div><label for="bcCat">네이버 카테고리</label><input id="bcCat" value="${esc(cfg.cat)}" placeholder="예: 홈케어(생활·인테리어)"></div></div>
@@ -139,11 +145,13 @@ async function viewBlogAuto() {
       <label for="bcBid">구글 블로그 ID (바로 올리기용, 선택)</label><input id="bcBid" value="${esc(cfg.bloggerId)}" placeholder="Blogger 대시보드 주소의 blogID= 뒤 숫자">
       <div class="muted" style="font-size:12px">네이버 아이디·티스토리 주소는 📣 마케팅 설정 값을 같이 씁니다${mc.naverId || mc.tistory ? '' : '(아직 비어 있음)'}.</div>
       <button class="btn block" id="bcSave" type="button" style="margin-top:8px">💾 기본 정보 저장</button></details>
+    <details class="card"><summary><b>🪪 블로그 소개글 만들기</b></summary><div id="baIntro"></div></details>
+    <details class="card"><summary><b>🔐 블로그 계정 메모</b></summary><div id="baVault"></div></details>
     ${drafts.length ? `<div class="card"><h2>지난 글</h2>${drafts.slice(0, 15).map((x) => `<a class="item" href="#" data-open="${x.id}"><div class="t">${esc(x.title || x.kw || '(제목 없음)')}</div><div class="muted">${esc(x.at.slice(0, 10))} · 사진 ${x.n || 0}장</div></a>`).join('')}</div>` : ''}`;
 
   const chans = () => [...$('#baCh').querySelectorAll('.chip.on')].map((b) => b.dataset.k);
   const data = () => ({ memo: $('#baMemo').value.trim(), kw: $('#baKw').value.trim(), region: $('#baReg').value.trim(), chans: chans(), n: photos.length });
-  const pv = () => { $('#baPv').textContent = baPrompt(cfg, data()); };
+  const pv = () => { $('#baPv').textContent = baPrompt(cfg, data(), rules); };
   const saveDraft = async (extra = {}) => {
     const list = await getSetting('blogDrafts', []);
     const id = (cur && cur.id) || sessionStorage.getItem('baCur') || 'blog-' + uid();
@@ -176,12 +184,44 @@ async function viewBlogAuto() {
     if (navigator.canShare && navigator.canShare({ files })) { try { await navigator.share({ files }); } catch { /* 취소 */ } }
     else files.forEach((f) => { const a = document.createElement('a'); a.href = URL.createObjectURL(f); a.download = f.name; document.body.appendChild(a); a.click(); a.remove(); });
   };
+  // 🎞 움짤(GIF)
+  if ($('#baGif')) $('#baGif').onclick = async () => {
+    const out = $('#baGifOut'), btn = $('#baGif'); btn.disabled = true; out.innerHTML = '<div class="muted" style="margin-top:6px">만드는 중… (사진 수에 따라 10~30초)</div>';
+    try {
+      const blob = await baMakeGif(photos.map((p) => p.blob), { w: 600, hold: 900 });
+      const url = URL.createObjectURL(blob), mb = (blob.size / 1048576).toFixed(1);
+      out.innerHTML = `<img src="${url}" alt="움짤 미리보기" style="width:100%;border-radius:8px;margin-top:8px"><div class="muted" style="font-size:12px">${mb}MB · 600px · 사진 ${photos.length}장${blob.size > 10 * 1048576 ? ' — 10MB가 넘어 올리기 어려울 수 있습니다(사진 수를 줄여 보세요)' : ''}</div>
+        <div class="grid2" style="margin-top:6px"><button class="btn primary" id="gifSave" type="button">⬇ 저장·공유</button><button class="btn" id="gifRe" type="button">다시 만들기</button></div>
+        <div class="muted" style="font-size:12px;margin-top:4px">블로그 글쓰기에서 사진 넣기로 이 GIF 파일을 고르면 움직이는 사진으로 올라갑니다. 보통 글 맨 위나 '끝난 모습' 자리에 넣습니다.</div>`;
+      const file = new File([blob], `움짤-${(data().kw || cfg.type || 'blog').replace(/\s+/g, '')}.gif`, { type: 'image/gif' });
+      $('#gifSave').onclick = async () => {
+        if (navigator.canShare && navigator.canShare({ files: [file] })) { try { await navigator.share({ files: [file] }); return; } catch { /* 취소 */ } }
+        const a = document.createElement('a'); a.href = url; a.download = file.name; document.body.appendChild(a); a.click(); a.remove();
+      };
+      $('#gifRe').onclick = () => $('#baGif').click();
+    } catch (err) { out.innerHTML = `<div class="errbox" style="margin-top:6px">움짤을 만들지 못했습니다: ${esc(err.message)}</div>`; }
+    finally { btn.disabled = false; }
+  };
+  // 📈 발행 기록·조회수
+  if (cur && $('#baPub')) baPubUI($('#baPub'), cur, saveDraft);
+  // 🪪 블로그 소개글
+  { const it = baIntro(cfg), box = $('#baIntro');
+    box.innerHTML = `<div class="muted" style="font-size:13px;margin-top:6px">⚙️ 기본 정보(업종·지역·업체명·문의 문구)로 만듭니다. 고쳐서 쓰세요.</div>
+      <label>블로그 이름 후보</label>${it.names.map((n) => `<div class="row spread" style="margin:4px 0"><span>${esc(n)}</span><button class="btn small" data-ic="${esc(n)}" type="button">복사</button></div>`).join('')}
+      <label>별명</label><div class="row spread"><span>${esc(it.nick)}</span><button class="btn small" data-ic="${esc(it.nick)}" type="button">복사</button></div>
+      <label>소개글 (200자 이내, 네이버 블로그 정보 → 소개글)</label><textarea id="ibShort" rows="3">${esc(it.short)}</textarea><button class="btn small" data-icf="ibShort" type="button">복사</button>
+      <label>프롤로그·고정 글 첫 화면</label><textarea id="ibPro" rows="9">${esc(it.prologue)}</textarea><button class="btn small" data-icf="ibPro" type="button">복사</button>
+      <div class="muted" style="font-size:12px;margin-top:6px">함께 하면 좋은 것: 카테고리를 업종 하나로 정리(예: 시공 후기 / 고르는 법 / 자주 묻는 질문), 프로필 사진은 작업복 차림이나 로고, 대표 이미지는 시공 후 사진.</div>`;
+    box.onclick = async (e) => { const t = e.target; const v = t.dataset.ic || (t.dataset.icf && $('#' + t.dataset.icf).value); if (!v) return; try { await navigator.clipboard.writeText(v); toast('복사했습니다'); } catch { prompt('복사해서 쓰세요', v); } };
+  }
+  // 🔐 계정 메모
+  baVaultUI($('#baVault'));
   $('#baGo').onclick = async () => {
     if (!cfg.type) { toast('⚙️ 기본 정보에 업종을 먼저 넣으세요'); return; }
     if (!chans().length) { toast('올릴 곳을 하나 이상 고르세요'); return; }
     if (!photos.length && !data().memo) { toast('사진이나 메모를 넣으세요'); return; }
     await saveDraft();
-    const p = baPrompt(cfg, data());
+    const p = baPrompt(cfg, data(), rules);
     try { await navigator.clipboard.writeText(p); } catch { /* 무시 */ }
     toast('요청문을 복사했습니다. claude.ai에서 사진을 첨부하고 붙여넣어 보내세요');
     window.open('https://claude.ai/new?q=' + encodeURIComponent(p.slice(0, 6000)), '_blank', 'noopener');
@@ -197,11 +237,13 @@ async function viewBlogAuto() {
         <div class="grid2" style="margin-top:6px"><button class="btn small" data-copy="desc" data-k="${k}" type="button">검색 설명 복사</button><button class="btn small" data-copy="slug" data-k="${k}" type="button">주소 복사</button></div>` : ''}
         <div class="grid2" style="margin-top:8px"><button class="btn" data-copy="title" data-k="${k}" type="button">제목 복사</button><button class="btn" data-copy="body" data-k="${k}" type="button">본문 복사</button>
           <button class="btn" data-copy="tags" data-k="${k}" type="button">태그 복사</button><button class="btn primary" data-write="${k}" type="button">✏️ 글쓰기 화면 열기</button></div>
+        ${k !== 'blogger' ? `<button class="btn primary block" data-rich="${k}" type="button" style="margin-top:6px">🎨 본문 서식 복사 (글꼴·색·줄바꿈 그대로)</button>` : ''}
         ${k === 'blogger' ? `<button class="btn primary block" data-post="${k}" type="button" style="margin-top:6px">🔵 구글 블로그에 임시저장으로 올리기</button><div class="muted" style="font-size:12px">사진은 올라가지 않습니다. Blogger 편집 화면에서 [사진n] 자리에 넣고 '게시'를 눌러 공개하세요.</div>` : ''}
         ${k === 'naver' ? '<div class="muted" style="font-size:12px;margin-top:4px">네이버 글쓰기에서 [사진n] 자리마다 같은 번호 사진을 넣으세요. 태그는 본문 아래 태그 칸에.</div>' : ''}</div>`; }).join('');
     const val = (k, f) => $(`#baOut [data-k="${k}"][data-f="${f}"]`).value;
     $('#baOut').onclick = async (e) => {
-      const c = e.target.closest('[data-copy]'), w = e.target.closest('[data-write]'), p = e.target.closest('[data-post]');
+      const c = e.target.closest('[data-copy]'), w = e.target.closest('[data-write]'), p = e.target.closest('[data-post]'), rc = e.target.closest('[data-rich]');
+      if (rc) { const ok = await baCopyRich(val(rc.dataset.k, 'body'), rc.dataset.k); toast(ok ? '서식째 복사했습니다. 글쓰기 본문에 붙여넣으세요' : '이 브라우저는 서식 복사가 안 돼 글만 복사했습니다'); }
       if (c) { try { await navigator.clipboard.writeText(val(c.dataset.k, c.dataset.copy)); toast('복사했습니다'); } catch { prompt('복사해서 쓰세요', val(c.dataset.k, c.dataset.copy)); } }
       if (w) {
         const k = w.dataset.k;
@@ -214,7 +256,7 @@ async function viewBlogAuto() {
         p.disabled = true; p.textContent = '올리는 중…';
         try {
           const tags = val('blogger', 'tags').split(/[,#]/).map((x) => x.trim()).filter(Boolean).slice(0, 10);
-          const d = await callSheet('blogger', { blogId: cfg.bloggerId, title: val('blogger', 'title'), html: baHtml(val('blogger', 'body')), labels: tags });
+          const d = await callSheet('blogger', { blogId: cfg.bloggerId, title: val('blogger', 'title'), html: baRich(val('blogger', 'body'), 'blogger'), labels: tags });
           p.textContent = '✅ 임시저장 완료 — Blogger에서 확인'; if (d.url) window.open(d.url, '_blank', 'noopener');
           await saveDraft({ bloggerDraft: d.id || true });
         } catch (err) {
