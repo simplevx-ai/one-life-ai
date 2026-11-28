@@ -3,7 +3,7 @@
  */
 'use strict';
 
-const APP_VERSION = '0.13.2';
+const APP_VERSION = '0.13.3';
 const STATUSES = ['접수', '견적', '예약', '완료', '취소'];
 const METHODS = ['계좌이체', '현금', '카드', '기타'];
 const PHOTO_KINDS = ['시공 전', '시공 후', '기타', '고객 사진'];
@@ -996,12 +996,17 @@ const isoToSheet = (s) => (s ? s.slice(0, 16).replace('T', ' ') : '');
 async function callSheet(action, extra) {
   const cfg = await getSetting('sheet', {});
   if (!cfg.url || !cfg.key) throw new Error('설정에서 시트 웹 앱 주소와 비밀 키를 먼저 넣어 주세요');
-  let r;
+  let r, t;
+  // 구글 스크립트는 오래 안 쓰면 처음 응답이 10~20초 걸릴 수 있어 40초까지 기다리고, 넘으면 멈춘 채로 두지 않고 알려 준다.
+  // 시트에 줄을 쓰는 요청이 두 번 들어가지 않게 자동 재시도는 하지 않는다.
+  const ac = new AbortController(), timer = setTimeout(() => ac.abort(), 40000);
   try {
     // kind '연결 테스트'를 같이 보내 옛 스크립트(v1)가 시트에 줄을 추가하지 않게 한다
-    r = await fetch(cfg.url, { method: 'POST', body: JSON.stringify({ key: cfg.key, kind: '연결 테스트', action, ...extra }) });
-  } catch { throw new Error('인터넷 연결이나 웹 앱 주소를 확인하세요'); }
-  const t = await r.text();
+    r = await fetch(cfg.url, { method: 'POST', body: JSON.stringify({ key: cfg.key, kind: '연결 테스트', action, ...extra }), signal: ac.signal });
+    t = await r.text();
+  } catch (e) {
+    throw new Error(e && e.name === 'AbortError' ? '시트 연결이 너무 느립니다(40초). 잠시 뒤 다시 시도하세요 — 시트에 이미 들어갔을 수 있으니 시트를 먼저 확인하세요' : '인터넷 연결이나 웹 앱 주소를 확인하세요');
+  } finally { clearTimeout(timer); }
   if (t.trim() === 'test ok') throw new Error('시트 스크립트가 옛 버전입니다. 새 코드로 바꾸고 새 버전으로 배포해 주세요');
   if (t.trim() === 'denied') throw new Error('비밀 키가 다릅니다');
   let d;
