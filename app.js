@@ -3,7 +3,7 @@
  */
 'use strict';
 
-const APP_VERSION = '0.13.3';
+const APP_VERSION = '0.13.4';
 const STATUSES = ['접수', '견적', '예약', '완료', '취소'];
 const METHODS = ['계좌이체', '현금', '카드', '기타'];
 const PHOTO_KINDS = ['시공 전', '시공 후', '기타', '고객 사진'];
@@ -1180,6 +1180,7 @@ async function viewSettings() {
     <div class="card">
       <h2>앱 정보</h2>
       <div class="muted">ONE LIFE AI v${APP_VERSION} · 1단계(홈 + 사업 관리)<br>폰 홈 화면에 추가: 크롬 ⋮ → '홈 화면에 추가' 또는 '앱 설치'</div>
+      ${updButton(APP_VERSION)}
     </div>`;
 
   $('#saveLists').onclick = async () => {
